@@ -1,0 +1,66 @@
+#!/bin/bash
+
+# Create VPC and Subnets as defined in a config file.
+#
+# Sample config file (subnets.cfg)
+# ----
+# # VPC CIDR - must come before the subnets, last field = "VPC"
+# # CIDR		NAME	"VPC"
+# 192.168.0.0/21	my-vpc	VPC
+#
+# # Subnets specifications within the above VPC
+# # CIDR		NAME	AZ
+# 192.168.0.0/24	web-a	ap-southeast-2a
+# 192.168.1.0/24	web-b	ap-southeast-2b
+# 192.168.2.0/24	app-a	ap-southeast-2a
+# 192.168.3.0/24	app-b	ap-southeast-2b
+# ----
+#
+# Usage: create-vpc-subnets subnets.cfg
+# It is safe to re-run the command at any time (e.g. to create more subnets)
+# and it won't break the existing ones.
+
+# Author: Michael Ludvig <michael.ludvig@enterpriseit.co.nz>
+
+AWS='aws --profile poc1'
+
+function create_vpc() {
+	CIDR="$1"
+	NAME="$2"
+	VPC_ID=$(${AWS} ec2 describe-vpcs --filters "Name=cidr,Values=${CIDR}" | jq -r '.Vpcs[0].VpcId')
+	if [ "${VPC_ID:0:4}" != "vpc-" ]; then
+		# VPC with this CIDR doesn't yet exist - create new
+		VPC_ID=$(${AWS} ec2 create-vpc --cidr-block ${CIDR} | jq -r '.Vpc.VpcId')
+		${AWS} ec2 create-tags --resources "${VPC_ID}" --tags Key=Name,Value="${NAME}"
+	fi
+	if [ "${VPC_ID:0:4}" != "vpc-" ]; then
+		echo "Can't figure out VPC_ID for ${CIDR}" >&2
+		exit 1
+	fi
+	while test $(${AWS} ec2 describe-vpcs --filters "Name=vpc-id,Values=${VPC_ID}" | jq -r '.Vpcs[0].State') != "available"; do
+		sleep 1
+	done
+	echo ${VPC_ID}
+}
+
+while read CIDR NAME AZ; do
+	test "${CIDR:0:1}" = '#' -o -z "${CIDR}" && continue
+	if [ "${AZ}" = "VPC" ]; then
+		VPC_ID=$(create_vpc ${CIDR} "${NAME}")
+		echo "VPC: ${CIDR} = ${VPC_ID}"
+		continue
+	fi
+	if [ "${VPC_ID:0:4}" != "vpc-" ]; then
+		echo "Unknown VPC_ID. Please fix the config file." >&2
+		exit 1
+	fi
+	SUBNET_ID=$(${AWS} ec2 describe-subnets --filters "Name=cidr,Values=${CIDR}" | jq -r '.Subnets[0].SubnetId')
+	if [ "${SUBNET_ID:0:7}" != "subnet-" ]; then
+		SUBNET_ID=$(${AWS} ec2 create-subnet --vpc-id ${VPC_ID} --cidr-block ${CIDR} --availability-zone ${AZ} | jq -r '.Subnet.SubnetId')
+		${AWS} ec2 create-tags --resources "${SUBNET_ID}" --tags Key=Name,Value="${NAME}"
+	fi
+	if [ "${SUBNET_ID:0:7}" != "subnet-" ]; then
+		echo "Can't figure out SUBNET_ID for ${CIDR}" >&2
+	fi
+	echo ${CIDR} = ${SUBNET_ID}
+done < "$1"
