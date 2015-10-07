@@ -41,6 +41,11 @@ __EOF__
 	exit 1
 }
 
+function fatal() {
+	echo $1 >&2
+	exit 1
+}
+
 function create_vpc() {
 	CIDR="$1"
 	NAME="$2"
@@ -50,10 +55,8 @@ function create_vpc() {
 		VPC_ID=$(${AWS} ec2 create-vpc --cidr-block ${CIDR} | jq -r '.Vpc.VpcId')
 		${AWS} ec2 create-tags --resources "${VPC_ID}" --tags Key=Name,Value="${NAME}"
 	fi
-	if [ "${VPC_ID:0:4}" != "vpc-" ]; then
-		echo "Can't figure out VPC_ID for ${CIDR}" >&2
-		exit 1
-	fi
+	test "${VPC_ID:0:4}" = "vpc-" || fatal "Can't figure out VPC_ID for ${CIDR}"
+
 	while test $(${AWS} ec2 describe-vpcs --filters "Name=vpc-id,Values=${VPC_ID}" | jq -r '.Vpcs[0].State') != "available"; do
 		sleep 1
 	done
@@ -62,10 +65,7 @@ function create_vpc() {
 
 AWS=$(which aws 2>/dev/null)
 
-if [ -z "${AWS}" ]; then
-	echo "The 'aws' utility not found. Please install it or add its location to \$PATH" >&2
-	exit 1
-fi
+test -z "${AWS}" && fatal "The 'aws' utility not found. Please install it or add its location to \$PATH"
 
 while getopts "c:p:h" OPT; do
 	case "${OPT}" in
@@ -81,16 +81,9 @@ while getopts "c:p:h" OPT; do
 	esac
 done
 
-if [ -z "${CONFIG}" ]; then
-	echo "No config file provided. Please use '-c /path/to/subnets.cfg' or -h for help." >&2
-	exit 1
-fi
+test -z "${CONFIG}" && fatal "No config file provided. Please use '-c /path/to/subnets.cfg' or -h for help."
 
-${AWS} ec2 describe-vpcs > /dev/null
-if [ "$?" != "0" ]; then
-	echo "AWS access failed. Verify your profile ('-p PROFILE') or use -h for help." >&2
-	exit 1
-fi
+${AWS} ec2 describe-vpcs > /dev/null || fatal "AWS access failed. Verify your profile ('-p PROFILE') or use -h for help."
 
 while read CIDR NAME AZ; do
 	test "${CIDR:0:1}" = '#' -o -z "${CIDR}" && continue
@@ -99,10 +92,8 @@ while read CIDR NAME AZ; do
 		echo "VPC: ${CIDR} = ${VPC_ID}"
 		continue
 	fi
-	if [ "${VPC_ID:0:4}" != "vpc-" ]; then
-		echo "Unknown VPC_ID. Please fix the config file." >&2
-		exit 1
-	fi
+	test "${VPC_ID:0:4}" = "vpc-" || fatal "Unknown VPC_ID. Please fix the config file."
+
 	SUBNET_ID=$(${AWS} ec2 describe-subnets --filters "Name=cidr,Values=${CIDR}" | jq -r '.Subnets[0].SubnetId')
 	if [ "${SUBNET_ID:0:7}" != "subnet-" ]; then
 		SUBNET_ID=$(${AWS} ec2 create-subnet --vpc-id ${VPC_ID} --cidr-block ${CIDR} --availability-zone ${AZ} | jq -r '.Subnet.SubnetId')
