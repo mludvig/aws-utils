@@ -1,0 +1,3 @@
+ROLE|ARN
+project1-s3|arn:aws:iam::123456789012:role/Jenkins-S3
+project2-s3|arn:aws:iam::987654321098:role/Jenkins-S3
