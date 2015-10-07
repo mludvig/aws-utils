@@ -1,0 +1,36 @@
+#!/bin/bash
+
+# Run on AWS EC2 instance to create an image (AMI)
+# Notes:
+#  - it will reboot the instance to ensure consistent filesystem
+#  - the instance role's policy must allow image creation
+
+# By Michael Ludvig <mludvig@logix.net.nz>
+# License GPLv3
+
+set -e
+
+META_DATA="http://169.254.169.254/latest/meta-data"
+
+## Obtain credentials from IAM Role
+function get_credentials() {
+        ROLE_NAME=$(curl -s ${META_DATA}/iam/security-credentials/ | head -n 1)
+        curl -s ${META_DATA}/iam/security-credentials/${ROLE_NAME} | jq -r '
+                @text "export AWS_ACCESS_KEY_ID=\"\(.AccessKeyId)\"",
+                @text "export AWS_SECRET_ACCESS_KEY=\"\(.SecretAccessKey)\"",
+                @text "export AWS_SESSION_TOKEN=\"\(.Token)\""
+                '
+}
+
+## Figure out the Availabilty Zone and Region
+AZ=$(curl -s ${META_DATA}/placement/availability-zone)
+REGION=${AZ%%?} # Chop off the last character from the Availability Zone's name
+
+## Parse credentials
+eval $(get_credentials)
+
+## Figure out our Instance ID
+INSTANCE_ID=$(curl -s ${META_DATA}/instance-id)
+
+## Aaaand ... tadaaa ... create image (this will reboot us!)
+aws --region=${REGION} ec2 create-image --instance-id ${INSTANCE_ID} --reboot --name "${INSTANCE_ID}_$(date +%s)" --description "${INSTANCE_ID}_$(date +%s)"
