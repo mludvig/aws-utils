@@ -17,12 +17,29 @@
 # ----
 #
 # Usage: create-vpc-subnets subnets.cfg
+#
 # It is safe to re-run the command at any time (e.g. to create more subnets)
 # and it won't break the existing ones.
 
 # Author: Michael Ludvig <michael.ludvig@enterpriseit.co.nz>
 
-AWS='aws --profile poc1'
+function show_help() {
+	cat << __EOF__
+Usage: $0 -c CONFIG [-p PROFILE] [-h]
+
+Create VPC and Subnets as defined in a config file.
+
+   -c CONFIG    Name of the config file with VPC and Subnet definitions.
+
+   -p PROFILE   AWS-CLI Profile name as defined in ~/.aws/config.
+                Optional, will use default or instance meta-data if
+                not specified.
+
+   -h           Display help.
+
+__EOF__
+	exit 1
+}
 
 function create_vpc() {
 	CIDR="$1"
@@ -42,6 +59,38 @@ function create_vpc() {
 	done
 	echo ${VPC_ID}
 }
+
+AWS=$(which aws 2>/dev/null)
+
+if [ -z "${AWS}" ]; then
+	echo "The 'aws' utility not found. Please install it or add its location to \$PATH" >&2
+	exit 1
+fi
+
+while getopts "c:p:h" OPT; do
+	case "${OPT}" in
+	c)
+		CONFIG="${OPTARG}"
+		;;
+	p)
+		AWS="${AWS} --profile=${OPTARG}"
+		;;
+	h)
+		show_help
+		;;
+	esac
+done
+
+if [ -z "${CONFIG}" ]; then
+	echo "No config file provided. Please use '-c /path/to/subnets.cfg' or -h for help." >&2
+	exit 1
+fi
+
+${AWS} ec2 describe-vpcs > /dev/null
+if [ "$?" != "0" ]; then
+	echo "AWS access failed. Verify your profile ('-p PROFILE') or use -h for help." >&2
+	exit 1
+fi
 
 while read CIDR NAME AZ; do
 	test "${CIDR:0:1}" = '#' -o -z "${CIDR}" && continue
@@ -63,4 +112,4 @@ while read CIDR NAME AZ; do
 		echo "Can't figure out SUBNET_ID for ${CIDR}" >&2
 	fi
 	echo ${CIDR} = ${SUBNET_ID}
-done < "$1"
+done < "${CONFIG}"
