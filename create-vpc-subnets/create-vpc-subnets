@@ -83,6 +83,8 @@ done
 
 test -z "${CONFIG}" && fatal "No config file provided. Please use '-c /path/to/subnets.cfg' or -h for help."
 
+echo "Getting ready, this may take a while..."
+
 ${AWS} ec2 describe-vpcs > /dev/null || fatal "AWS access failed. Verify your profile ('-p PROFILE') or use -h for help."
 
 while read CIDR NAME AZ; do
@@ -94,13 +96,15 @@ while read CIDR NAME AZ; do
 	fi
 	test "${VPC_ID:0:4}" = "vpc-" || fatal "Unknown VPC_ID. Please fix the config file."
 
+	NEW=""
 	SUBNET_ID=$(${AWS} ec2 describe-subnets --filters "Name=cidr,Values=${CIDR}" | jq -r '.Subnets[0].SubnetId')
 	if [ "${SUBNET_ID:0:7}" != "subnet-" ]; then
 		SUBNET_ID=$(${AWS} ec2 create-subnet --vpc-id ${VPC_ID} --cidr-block ${CIDR} --availability-zone ${AZ} | jq -r '.Subnet.SubnetId')
 		${AWS} ec2 create-tags --resources "${SUBNET_ID}" --tags Key=Name,Value="${NAME}"
+		NEW="(new)"
 	fi
 	if [ "${SUBNET_ID:0:7}" != "subnet-" ]; then
 		echo "Can't figure out SUBNET_ID for ${CIDR}" >&2
 	fi
-	echo ${CIDR} = ${SUBNET_ID}
+	echo "Subnet: ${CIDR} = ${SUBNET_ID} [${NAME}] ${NEW}"
 done < "${CONFIG}"
