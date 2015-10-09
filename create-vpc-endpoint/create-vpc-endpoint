@@ -7,7 +7,7 @@
 
 function show_help() {
 	cat << __EOF__
-Usage: $0 [-p PROFILE] [-v VPC-ID] [-r ROUTE-TABLE-ID] [-h]
+Usage: $0 [OPTIONS]
 
 Create VPC and Subnets as defined in a config file.
 
@@ -23,6 +23,11 @@ Create VPC and Subnets as defined in a config file.
                 Routing table where to install the Endpoint route.
                 Optional, only needed if more than one Routing table
                 exists in the VPC.
+
+   -s SERVICE-ID
+                Endpoint Service to attach to the VPC.
+                Optional, only needed if more than one Endpoint Service
+                is available in the AWS region.
 
    -h           Display help.
 
@@ -45,13 +50,16 @@ trap cleanup EXIT
 
 test -z "${AWS}" && fatal "The 'aws' utility not found. Please install it or add its location to \$PATH"
 
-while getopts "p:r:v:h" OPT; do
+while getopts "p:r:s:v:h" OPT; do
 	case "${OPT}" in
 	p)
 		AWS="${AWS} --profile=${OPTARG}"
 		;;
 	r)
 		ROUTETAB_ID="${OPTARG}"
+		;;
+	s)
+		SERVICE_ID="${OPTARG}"
 		;;
 	v)
 		VPC_ID="${OPTARG}"
@@ -64,7 +72,7 @@ done
 
 # Determine if we have exactly one VPC to work with
 FILTER=""
-test -z "${VPC_ID}" || FILTER="--filter Name=vpc-id,Values=${VPC_ID}"
+test -n "${VPC_ID}" && FILTER="--filter Name=vpc-id,Values=${VPC_ID}"
 ${AWS} ec2 describe-vpcs ${FILTER} | jq -f unfold-tags.jq > ${TMPFILE} || fatal "Unable to list VPCs"
 case $(jq 'length' ${TMPFILE}) in
 	0)
@@ -82,7 +90,7 @@ esac
 
 # Determine if we have exactly one routing table to work with
 FILTER="--filter Name=vpc-id,Values=${VPC_ID}"
-test -z "${ROUTETAB_ID}" || FILTER="${FILTER} --filter Name=route-table-id,Values=${ROUTETAB_ID}"
+test -n "${ROUTETAB_ID}" && FILTER="${FILTER} --filter Name=route-table-id,Values=${ROUTETAB_ID}"
 ${AWS} ec2 describe-route-tables ${FILTER} | jq -f unfold-tags.jq > ${TMPFILE} || fatal "Unable to list RouteTables"
 case $(jq 'length' ${TMPFILE}) in
 	0)
@@ -98,4 +106,23 @@ case $(jq 'length' ${TMPFILE}) in
 		;;
 esac
 
-echo "${VPC_ID} - ${RT_ID}"
+# Determine if we have exactly one service to work with
+${AWS} ec2 describe-vpc-endpoint-services | jq -r '.ServiceNames[]' > ${TMPFILE}
+if [ -n "${SERVICE_ID}" ]; then
+	_ID=$(grep ${SERVICE_ID} ${TMPFILE})
+	echo ${_ID} > ${TMPFILE}
+fi
+case $(grep -c com.amazonaws ${TMPFILE}) in
+	0)
+		fatal "No Endpint Services available. AWS is broken or -s parameter not invalid."
+		;;
+	1)
+		SERVICE_ID=$(cat ${TMPFILE})
+		;;
+	*)
+		echo "More than one Endpoint Service found, use -s Service-Name to select one:" >&2
+		cat ${TMPFILE} >&2
+		exit 1
+		;;
+esac
+echo "${VPC_ID} - ${RT_ID} - ${SERVICE_ID}"
