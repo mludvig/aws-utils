@@ -5,6 +5,8 @@
 
 # Author: Michael Ludvig <michael.ludvig@enterpriseit.co.nz>
 
+set -e
+
 function show_help() {
 	cat << __EOF__
 Usage: $0 [OPTIONS]
@@ -70,6 +72,8 @@ while getopts "p:r:s:v:h" OPT; do
 	esac
 done
 
+echo "Building configuration, this may take a while..."
+
 # Determine if we have exactly one VPC to work with
 FILTER=""
 test -n "${VPC_ID}" && FILTER="--filter Name=vpc-id,Values=${VPC_ID}"
@@ -87,6 +91,7 @@ case $(jq 'length' ${TMPFILE}) in
 		exit 1
 		;;
 esac
+echo "VPC: ${VPC_ID}"
 
 # Determine if we have exactly one routing table to work with
 FILTER="--filter Name=vpc-id,Values=${VPC_ID}"
@@ -105,6 +110,7 @@ case $(jq 'length' ${TMPFILE}) in
 		exit 1
 		;;
 esac
+echo "Route Table: ${RT_ID}"
 
 # Determine if we have exactly one service to work with
 ${AWS} ec2 describe-vpc-endpoint-services | jq -r '.ServiceNames[]' > ${TMPFILE}
@@ -125,4 +131,9 @@ case $(grep -c com.amazonaws ${TMPFILE}) in
 		exit 1
 		;;
 esac
-echo "${VPC_ID} - ${RT_ID} - ${SERVICE_ID}"
+echo "Service: ${SERVICE_ID}"
+
+# Create the endpoint
+${AWS} ec2 create-vpc-endpoint --vpc-id ${VPC_ID} --route-table-ids ${RT_ID} --service-name ${SERVICE_ID} > ${TMPFILE}
+VPCE_ID=$(jq -r '.VpcEndpoint.VpcEndpointId' ${TMPFILE})
+echo "Done: ${VPCE_ID} has been created"
