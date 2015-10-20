@@ -7,6 +7,10 @@
 
 set -e
 
+export SCRIPTS_DIR=$(dirname $0)
+test -z "${SCRIPTS_DIR}" && SCRIPTS_DIR=$(dirname $(which $0))
+export JQ_DIR=${SCRIPTS_DIR}/../jq
+
 function show_help() {
 	cat << __EOF__
 Usage: $0 [OPTIONS]
@@ -77,7 +81,7 @@ echo "Building configuration, this may take a while..."
 # Determine if we have exactly one VPC to work with
 FILTER=""
 test -n "${VPC_ID}" && FILTER="--filter Name=vpc-id,Values=${VPC_ID}"
-${AWS} ec2 describe-vpcs ${FILTER} | jq -f unfold-tags.jq > ${TMPFILE} || fatal "Unable to list VPCs"
+${AWS} ec2 describe-vpcs ${FILTER} | jq -f ${JQ_DIR}/unfold-tags.jq > ${TMPFILE} || fatal "Unable to list VPCs"
 case $(jq 'length' ${TMPFILE}) in
 	0)
 		fatal "No VPCs found or -v parameter invalid for this account"
@@ -96,7 +100,7 @@ echo "VPC: ${VPC_ID}"
 # Determine if we have exactly one routing table to work with
 FILTER="--filter Name=vpc-id,Values=${VPC_ID}"
 test -n "${ROUTETAB_ID}" && FILTER="${FILTER} --filter Name=route-table-id,Values=${ROUTETAB_ID}"
-${AWS} ec2 describe-route-tables ${FILTER} | jq -f unfold-tags.jq > ${TMPFILE} || fatal "Unable to list RouteTables"
+${AWS} ec2 describe-route-tables ${FILTER} | jq -f ${JQ_DIR}/unfold-tags.jq > ${TMPFILE} || fatal "Unable to list RouteTables"
 case $(jq 'length' ${TMPFILE}) in
 	0)
 		fatal "No RouteTables found or -r parameter invalid for this VPC"
