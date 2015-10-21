@@ -1,0 +1,1 @@
+.[] | @text "\(.VpcId) \(.CidrBlock)   \(.TagName)"
