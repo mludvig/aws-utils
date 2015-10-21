@@ -1,0 +1,1 @@
+.[] | select(.TagName == $stackname) | .VpcId

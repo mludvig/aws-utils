@@ -1,0 +1,79 @@
+#!/bin/bash
+
+# Creates a vpc peering connection between two VPCs
+
+# Author: Michael Ludvig <michael.ludvig@enterpriseit.co.nz>
+
+set -e
+
+export SCRIPTS_DIR=$(dirname $0)
+test -z "${SCRIPTS_DIR}" && SCRIPTS_DIR=$(dirname $(which $0))
+export JQ_DIR=${SCRIPTS_DIR}/../jq
+
+if [ $# -ne 4 ]
+  then
+    echo "Usage:     create-vpcpeer <source profile> <source vpc> <target profile> <target vpc>"
+    echo "Example:   create-vpcpeer Shared Shared-VPC Sandpit1 vpc-abcd1234"
+    echo "List VPCs: create-vpcpeer Shared --list Sandpit1 --list"
+    echo
+    echo "VPCs can be specified either by the name tag or by vpc-xxxxxxxx id."
+    exit 1
+fi
+
+SOURCE_PROFILE=$1
+SOURCE_VPC=$2
+TARGET_PROFILE=$3
+TARGET_VPC=$4
+
+unset AWS_ACCESS_KEY_ID
+unset AWS_SECRET_ACCESS_KEY
+unset AWS_PROFILE_NUMBER
+
+SOURCE_AWS="aws --profile=${SOURCE_PROFILE}"
+TARGET_AWS="aws --profile=${TARGET_PROFILE}"
+
+SOURCE_JSON=$(${SOURCE_AWS} ec2 describe-vpcs | jq -f ${JQ_DIR}/unfold-tags.jq)
+TARGET_JSON=$(${TARGET_AWS} ec2 describe-vpcs | jq -f ${JQ_DIR}/unfold-tags.jq)
+if [ "${SOURCE_VPC}" == "--list" ]; then
+	echo "*** VPCs in ${SOURCE_PROFILE} ..."
+	jq -r -f ${JQ_DIR}/describe-vpcs.list.jq <<< ${SOURCE_JSON}
+	echo
+fi
+
+if [ "${TARGET_VPC}" == "--list" ]; then
+	echo "*** VPCs in ${TARGET_PROFILE} ..."
+	jq -r -f ${JQ_DIR}/describe-vpcs.list.jq <<< ${TARGET_JSON}
+	echo
+fi
+
+test "${SOURCE_VPC}" == "--list" -o "${TARGET_VPC}" == "--list" && exit 1
+
+echo "Working on it, please be patient..."
+
+grep -q "^vpc-" <<< "${SOURCE_VPC}" || SOURCE_VPC=$(jq -r --arg stackname "${SOURCE_VPC}" -f ${JQ_DIR}/describe-vpcs.tag2vpc.jq <<< ${SOURCE_JSON})
+grep -q "^vpc-" <<< "${TARGET_VPC}" || TARGET_VPC=$(jq -r --arg stackname "${TARGET_VPC}" -f ${JQ_DIR}/describe-vpcs.tag2vpc.jq <<< ${TARGET_JSON})
+
+SOURCE_ACCTID=$(${SOURCE_AWS} iam get-user | jq -r -f ${JQ_DIR}/get-user.acctid.jq)
+TARGET_ACCTID=$(${TARGET_AWS} iam get-user | jq -r -f ${JQ_DIR}/get-user.acctid.jq)
+
+echo SOURCE: $SOURCE_VPC/$SOURCE_ACCTID
+echo TARGET: $TARGET_VPC/$TARGET_ACCTID
+
+echo "Creating VPC Peering request from $SOURCE_VPC to $TARGET_VPC"
+VPC_REQ_JSON=$(${SOURCE_AWS} ec2 create-vpc-peering-connection --vpc-id $SOURCE_VPC --peer-vpc-id $TARGET_VPC --peer-owner-id $TARGET_ACCTID)
+if [ $? -ne 0 ]; then
+    echo "Error creating peering connection..."
+    exit 1
+fi
+jq . <<< ${VPC_REQ_JSON}
+
+PCX=$(jq -r .VpcPeeringConnection.VpcPeeringConnectionId <<< ${VPC_REQ_JSON})
+
+echo "Accepting VPC Peering request $PCX in ${TARGET_PROFILE}"
+aws ec2 accept-vpc-peering-connection --vpc-peering-connection-id $PCX --profile=$TARGET_PROFILE | jq .
+if [ $? -ne 0 ]; then
+    echo "Error accepting peering connection..."
+    exit 1
+fi
+
+echo "Accepted VPC Peering request $PCX from $SOURCE_VPC/$SOURCE_PROFILE to $TARGET_VPC/$TARGET_PROFILE"
