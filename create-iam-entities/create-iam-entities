@@ -1,0 +1,115 @@
+#!/bin/bash
+
+# Author: Michael Ludvig <michael.ludvig@enterpriseit.co.nz>
+
+set -e
+
+export SCRIPTS_DIR=$(dirname $0)
+test -z "${SCRIPTS_DIR}" && SCRIPTS_DIR=$(dirname $(which $0))
+export JQ_DIR=${SCRIPTS_DIR}/../jq
+
+function show_help() {
+	cat << __EOF__
+Usage: $0 -c CONFIG [-p PROFILE] [-h]
+
+Create IAM Policies, Groups and Users as defined in a config file.
+
+   -c CONFIG    Name of the config file with IAM definitions.
+
+   -p PROFILE   AWS-CLI Profile name as defined in ~/.aws/config.
+                Optional, will use default or instance meta-data if
+                not specified.
+
+   -h           Display help.
+
+__EOF__
+	exit 1
+}
+
+function fatal() {
+	echo $1 >&2
+	exit 1
+}
+
+
+AWS=$(which aws 2>/dev/null)
+
+test -z "${AWS}" && fatal "The 'aws' utility not found. Please install it or add its location to \$PATH"
+
+while getopts "c:p:h" OPT; do
+	case "${OPT}" in
+	c)
+		CONFIG="${OPTARG}"
+		;;
+	p)
+		AWS="${AWS} --profile=${OPTARG}"
+		;;
+	h)
+		show_help
+		;;
+	esac
+done
+
+test -z "${CONFIG}" && fatal "No config file provided. Please use '-c /path/to/iam.cfg' or -h for help."
+
+echo "Getting ready, this may take a while..."
+
+ACCTID=$(${AWS} iam get-user | jq -r -f ${JQ_DIR}/get-user.acctid.jq)
+
+echo "Account ID: ${ACCTID}"
+
+# List all entities
+IAM_POLICIES=$(${AWS} iam list-policies --scope=Local)
+IAM_GROUPS=$(${AWS} iam list-groups)
+IAM_USERS=$(${AWS} iam list-users)
+
+# Parse config file
+while read RESOURCE NAME VALUE COMMENT; do
+	test "${RESOURCE:0:1}" = '#' -o -z "${RESOURCE}" && continue
+	case "${RESOURCE}" in
+		POLICY)
+			POL_NAME=$(jq -r ".Policies[] | select(.PolicyName==\"${NAME}\") | .PolicyName" <<< ${IAM_POLICIES})
+			if [ "${POL_NAME}" == "${NAME}" ]; then
+				echo "${NAME}: Policy already exists."
+				continue
+			else
+				POL_DOC=$(sed "s/%ACCTID%/${ACCTID}/g" ${VALUE} | jq -c .)
+				POL_JSON=$(${AWS} iam create-policy --policy-name ${NAME} --policy-document "${POL_DOC}" --description "${COMMENT}")
+				echo "${NAME}: $(jq -r '.Policy.Arn' <<< ${POL_JSON}): Policy created"
+			fi
+			;;
+		GROUP)
+			GROUP_NAME=$(jq -r ".Groups[] | select(.GroupName==\"${NAME}\") | .GroupName" <<< ${IAM_GROUPS})
+			if [ "${GROUP_NAME}" == "${NAME}" ]; then
+				echo "${NAME}: Group already exists. Check attached policies manually."
+				continue
+			else
+				GROUP_JSON=$(${AWS} iam create-group --group-name ${NAME})
+				echo "${NAME}: $(jq -r '.Group.Arn' <<< ${GROUP_JSON}): Group created"
+				test -z "${IAM_ALL_POLICIES}" && IAM_ALL_POLICIES=$(${AWS} iam list-policies)
+				for POL in $(sed 's/,/ /g' <<< ${VALUE}); do
+					POL_ARN=$(jq -r ".Policies[] | select(.PolicyName == \"${POL}\") | .Arn" <<< ${IAM_ALL_POLICIES})
+					${AWS} iam attach-group-policy --group-name=${NAME} --policy-arn=${POL_ARN}
+					echo "${NAME}: ${POL}: Policy attached"
+				done
+			fi
+			;;
+		USER)
+			USER_NAME=$(jq -r ".Users[] | select(.UserName==\"${NAME}\") | .UserName" <<< ${IAM_USERS})
+			if [ "${USER_NAME}" == "${NAME}" ]; then
+				echo "${NAME}: User already exists. Check groups manually."
+				continue
+			else
+				USER_JSON=$(${AWS} iam create-user --user-name ${NAME})
+				echo "${NAME}: $(jq -r '.User.Arn' <<< ${USER_JSON}): User created"
+				for GRP in $(sed 's/,/ /g' <<< ${VALUE}); do
+					${AWS} iam add-user-to-group --user-name=${NAME} --group-name=${GRP}
+					echo "${NAME}: ${GRP}: User added to group"
+				done
+				USER_PASS=$(base64 /dev/urandom | head -n1 | cut -b1-10)
+				${AWS} iam create-login-profile --user-name ${NAME} --password "${USER_PASS}" --password-reset-required > /dev/null
+				echo "${NAME}: ${USER_PASS}: Password set"
+			fi
+			;;
+	esac
+done < "${CONFIG}"
