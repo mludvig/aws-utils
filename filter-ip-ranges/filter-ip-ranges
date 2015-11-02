@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+
+# Parse and filter published Amazon IP Ranges.
+# Useful for creating securitygroups based on AWS Services
+# E.g. incoming only from CloudFront
+#   or outgoing only to non-EC2 ranges in US-WEST-1 region
+
+# Author: Michal Ludvig <mludvig@logix.net.nz>
+
+import json
+import sys
+import argparse
+from httplib2 import Http
+
+def fatal(message):
+    print("ERROR: %s" % message, file=sys.stderr)
+    sys.exit(1)
+
+parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter)
+parser.description="""\
+Parse and Filter the published Amazon IP Ranges.
+"""
+parser.add_argument('--url', '-u', metavar="URL", default="https://ip-ranges.amazonaws.com/ip-ranges.json", help='URL for ip-ranges.json download. Default: %(default)s')
+parser.add_argument('--file', '-f', type=argparse.FileType('r'), help='Path to ip-ranges.json. Overrides --url')
+parser.add_argument('--no-print-serial', action="store_true", help='Do not print ip-ranges.json serial number (aka syncToken).')
+parser.add_argument('--min-serial', type=int, metavar="SERIAL", help='Only process the file id serial number (aka syncToken) is greater than SERIAL. No output is less or equal.')
+parser.add_argument('--quiet', action="store_true", help='Do not print any extra info, e.g. serial number, etc.')
+parser.add_argument('--verbose', '-v', action="store_true", help='Print the Region and Services along with each IP range.')
+parser.usage = parser.format_usage().rstrip()[7:]
+parser.usage += " [FILTER [...]]"
+parser.epilog = """
+FILTER Syntax
+
+    The IP Range prefixes can be filtered based on Services and Regions.
+    Keywords can be combined, for example: +AMAZON -EC2 us-west-1
+
+    +KEYWORD   Include prefixes with matching keyword (AMAZON).
+               The '+' sign is optional, +AMAZON and AMAZON works the same.
+
+    -KEYWORD   Exclude prefixes with service or region matching KEYWORD.
+
+    =KEYWORD   Include prefixes that have only one service matching KEYWORD.
+               Sometimes prefixes overlap and belong to multiple services.
+
+    The KEYWORD can be a Service (e.g. AMAZON, EC2, ...) or Region (us-west-1,
+    ap-southeast-2, GLOBAL).
+    """
+
+args, extra = parser.parse_known_args()
+
+if args.file:
+    try:
+        ipranges = json.load(args.file)
+    except ValueError:
+        fatal("File is not ip-ranges.json")
+else:
+    try:
+        resp, content = Http().request(args.url)
+        if resp.status != 200:
+            fatal("Unable to load %s - %d %s" % (args.url, resp.status, resp.reason))
+        content = content.decode('latin1')
+        ipranges = json.loads(content)
+    except Exception as e:
+        fatal("Unable to load %s - %s" % (args.url, e))
+
+if len(ipranges['prefixes']) < 1:
+    fatal("No prefixes found")
+
+if args.min_serial and int(ipranges['syncToken']) <= args.min_serial:
+    # Serial number is not greater than required by --min-serial=NNN
+    sys.exit(0)
+
+pfx_dict = {}
+for prefix in ipranges['prefixes']:
+    ip_prefix = prefix['ip_prefix']
+    if ip_prefix not in pfx_dict:
+        pfx_dict[ip_prefix] = {}
+        pfx_dict[ip_prefix]['net'] = ip_prefix
+        pfx_dict[ip_prefix]['rgn'] = prefix['region']
+        pfx_dict[ip_prefix]['svc'] = [ prefix['service'] ]
+    else:
+        pfx_dict[ip_prefix]['svc'].append(prefix['service'])
+
+prefixes = list(pfx_dict.values())
+
+for xarg in extra:
+    _pfx = []
+    if xarg.startswith('='):
+        # Filter records that have ONLY this service/region
+        _arg = xarg[1:]
+        for prefix in prefixes:
+            if prefix['svc'].count(_arg) and len(prefix['svc']) == 1:
+                _pfx.append(prefix)
+            elif prefix['rgn'] == _arg:
+                _pfx.append(prefix)
+    elif xarg.startswith('-'):
+        # Exclude this service/region
+        _arg = xarg[1:]
+        for prefix in prefixes:
+            if prefix['svc'].count(_arg) == 0 and prefix['rgn'] != _arg:
+                _pfx.append(prefix)
+    else:
+        # Include this service/region
+        _arg = xarg.startswith('+') and xarg[1:] or xarg
+        for prefix in prefixes:
+            if prefix['svc'].count(_arg):
+                _pfx.append(prefix)
+            elif prefix['rgn'] == _arg:
+                _pfx.append(prefix)
+    prefixes = _pfx
+
+if not args.no_print_serial:
+    print('# SERIAL=%s' % ipranges['syncToken'])
+
+if args.verbose:
+    print('# %d prefixes found / %d prefixes consolidated / %d prefixes matching' % (
+        len(ipranges['prefixes']), len(pfx_dict), len(prefixes)))
+
+for prefix in prefixes:
+    if args.verbose:
+        print("%s %s %s" % (prefix['net'], prefix['rgn'], " ".join(prefix['svc'])))
+    else:
+        print("%s" % prefix['net'])
