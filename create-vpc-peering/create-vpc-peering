@@ -10,10 +10,9 @@ export SCRIPTS_DIR=$(dirname $0)
 test -z "${SCRIPTS_DIR}" && SCRIPTS_DIR=$(dirname $(which $0))
 export JQ_DIR=${SCRIPTS_DIR}/../jq
 
-if [ $# -ne 4 ]
-  then
-    echo "Usage:     create-vpcpeer <source profile> <source vpc> <target profile> <target vpc>"
-    echo "Example:   create-vpcpeer Shared Shared-VPC Sandpit1 vpc-abcd1234"
+if [ $# -ne 4 ]; then
+    echo "Usage:     create-vpcpeer <source profile> <source vpc>/<route-table> <target profile> <target vpc>/<route-table>"
+    echo "Example:   create-vpcpeer Shared vpc-asdc1234/rtb-asdfghjk Sandpit1 Sandpit-VPC/rtb-zxcvbnmp"
     echo "List VPCs: create-vpcpeer Shared --list Sandpit1 --list"
     echo
     echo "VPCs can be specified either by the name tag or by vpc-xxxxxxxx id."
@@ -21,9 +20,9 @@ if [ $# -ne 4 ]
 fi
 
 SOURCE_PROFILE=$1
-SOURCE_VPC=$2
+SOURCE_VPC_RT=$2
 TARGET_PROFILE=$3
-TARGET_VPC=$4
+TARGET_VPC_RT=$4
 
 unset AWS_ACCESS_KEY_ID
 unset AWS_SECRET_ACCESS_KEY
@@ -34,19 +33,37 @@ TARGET_AWS="aws --profile=${TARGET_PROFILE}"
 
 SOURCE_JSON=$(${SOURCE_AWS} ec2 describe-vpcs | jq -f ${JQ_DIR}/unfold-tags.jq)
 TARGET_JSON=$(${TARGET_AWS} ec2 describe-vpcs | jq -f ${JQ_DIR}/unfold-tags.jq)
-if [ "${SOURCE_VPC}" == "--list" ]; then
+if [ "${SOURCE_VPC_RT}" == "--list" ]; then
 	echo "*** VPCs in ${SOURCE_PROFILE} ..."
 	jq -r -f ${JQ_DIR}/describe-vpcs.list.jq <<< ${SOURCE_JSON}
 	echo
-fi
-
-if [ "${TARGET_VPC}" == "--list" ]; then
-	echo "*** VPCs in ${TARGET_PROFILE} ..."
-	jq -r -f ${JQ_DIR}/describe-vpcs.list.jq <<< ${TARGET_JSON}
+	echo "*** RouteTables ..."
+	${SOURCE_AWS} ec2 describe-route-tables | jq -f ${JQ_DIR}/unfold-tags.jq | jq -r -f ${JQ_DIR}/describe-rt.list.jq
 	echo
 fi
 
-test "${SOURCE_VPC}" == "--list" -o "${TARGET_VPC}" == "--list" && exit 1
+if [ "${TARGET_VPC_RT}" == "--list" ]; then
+	echo "*** VPCs in ${TARGET_PROFILE} ..."
+	jq -r -f ${JQ_DIR}/describe-vpcs.list.jq <<< ${TARGET_JSON}
+	echo
+	echo "*** RouteTables ..."
+	${TARGET_AWS} ec2 describe-route-tables | jq -f ${JQ_DIR}/unfold-tags.jq | jq -r -f ${JQ_DIR}/describe-rt.list.jq
+	echo
+fi
+
+test "${SOURCE_VPC_RT}" == "--list" -o "${TARGET_VPC_RT}" == "--list" && exit 1
+
+SOURCE_VPC=${SOURCE_VPC_RT/\/*/}
+SOURCE_RT=${SOURCE_VPC_RT/*\//}
+
+TARGET_VPC=${TARGET_VPC_RT/\/*/}
+TARGET_RT=${TARGET_VPC_RT/*\//}
+
+if [ -z "${SOURCE_VPC}" -o -z "${SOURCE_RT}" -o -z "${TARGET_VPC}" -o -z "${TARGET_RT}" ]; then
+	echo "Source or Target VPC ID or RouteTable ID is missing."
+	echo "Please use vpc-abcd/rt-1234 form for both source and target accounts."
+	exit 1
+fi
 
 echo "Working on it, please be patient..."
 
@@ -56,8 +73,8 @@ grep -q "^vpc-" <<< "${TARGET_VPC}" || TARGET_VPC=$(jq -r --arg stackname "${TAR
 SOURCE_ACCTID=$(${SOURCE_AWS} iam get-user | jq -r -f ${JQ_DIR}/get-user.acctid.jq)
 TARGET_ACCTID=$(${TARGET_AWS} iam get-user | jq -r -f ${JQ_DIR}/get-user.acctid.jq)
 
-echo SOURCE: $SOURCE_VPC/$SOURCE_ACCTID
-echo TARGET: $TARGET_VPC/$TARGET_ACCTID
+echo SOURCE: $SOURCE_ACCTID $SOURCE_VPC/$SOURCE_RT
+echo TARGET: $TARGET_ACCTID $TARGET_VPC/$TARGET_RT
 
 echo "Creating VPC Peering request from $SOURCE_VPC to $TARGET_VPC"
 VPC_REQ_JSON=$(${SOURCE_AWS} ec2 create-vpc-peering-connection --vpc-id $SOURCE_VPC --peer-vpc-id $TARGET_VPC --peer-owner-id $TARGET_ACCTID)
@@ -65,12 +82,11 @@ if [ $? -ne 0 ]; then
     echo "Error creating peering connection..."
     exit 1
 fi
-jq . <<< ${VPC_REQ_JSON}
 
 PCX=$(jq -r .VpcPeeringConnection.VpcPeeringConnectionId <<< ${VPC_REQ_JSON})
 
 echo "Accepting VPC Peering request $PCX in ${TARGET_PROFILE}"
-aws ec2 accept-vpc-peering-connection --vpc-peering-connection-id $PCX --profile=$TARGET_PROFILE | jq .
+ACCEPTED_JSON=$(${TARGET_AWS} ec2 accept-vpc-peering-connection --vpc-peering-connection-id ${PCX})
 if [ $? -ne 0 ]; then
     echo "Error accepting peering connection..."
     exit 1
@@ -78,4 +94,15 @@ fi
 
 echo "Accepted VPC Peering request $PCX from $SOURCE_VPC/$SOURCE_PROFILE to $TARGET_VPC/$TARGET_PROFILE"
 
-echo "Don't forget to associtate ${PCX} with the Route Tables in both VPCs"
+jq . <<< ${ACCEPTED_JSON}
+
+SOURCE_CIDR=$(jq -r .VpcPeeringConnection.RequesterVpcInfo.CidrBlock <<< ${ACCEPTED_JSON})
+TARGET_CIDR=$(jq -r .VpcPeeringConnection.AccepterVpcInfo.CidrBlock <<< ${ACCEPTED_JSON})
+
+echo "Creating route for ${TARGET_CIDR} in ${SOURCE_ACCTID} / ${SOURCE_RT} ..."
+${SOURCE_AWS} ec2 create-route --route-table-id ${SOURCE_RT} --destination-cidr-block ${TARGET_CIDR} --vpc-peering-connection-id ${PCX} > /dev/null
+
+echo "Creating route for ${SOURCE_CIDR} in ${TARGET_ACCTID} / ${TARGET_RT} ..."
+${TARGET_AWS} ec2 create-route --route-table-id ${TARGET_RT} --destination-cidr-block ${SOURCE_CIDR} --vpc-peering-connection-id ${PCX} > /dev/null
+
+echo "All done!"
