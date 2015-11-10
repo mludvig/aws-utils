@@ -94,15 +94,13 @@ fi
 
 echo "Accepted VPC Peering request $PCX from $SOURCE_VPC/$SOURCE_PROFILE to $TARGET_VPC/$TARGET_PROFILE"
 
-jq . <<< ${ACCEPTED_JSON}
-
 SOURCE_CIDR=$(jq -r .VpcPeeringConnection.RequesterVpcInfo.CidrBlock <<< ${ACCEPTED_JSON})
 TARGET_CIDR=$(jq -r .VpcPeeringConnection.AccepterVpcInfo.CidrBlock <<< ${ACCEPTED_JSON})
 
-echo "Creating route for ${TARGET_CIDR} in ${SOURCE_ACCTID} / ${SOURCE_RT} ..."
+echo "Creating route for ${TARGET_CIDR} in ${SOURCE_PROFILE} / ${SOURCE_RT} ..."
 ${SOURCE_AWS} ec2 create-route --route-table-id ${SOURCE_RT} --destination-cidr-block ${TARGET_CIDR} --vpc-peering-connection-id ${PCX} > /dev/null
 
-echo "Creating route for ${SOURCE_CIDR} in ${TARGET_ACCTID} / ${TARGET_RT} ..."
+echo "Creating route for ${SOURCE_CIDR} in ${TARGET_PROFILE} / ${TARGET_RT} ..."
 ${TARGET_AWS} ec2 create-route --route-table-id ${TARGET_RT} --destination-cidr-block ${SOURCE_CIDR} --vpc-peering-connection-id ${PCX} > /dev/null
 
 echo "All done!"
