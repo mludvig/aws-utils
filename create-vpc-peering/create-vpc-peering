@@ -19,6 +19,33 @@ if [ $# -ne 4 ]; then
     exit 1
 fi
 
+function fatal() {
+	echo $1 >&2
+	exit 1
+}
+
+function get_routetable() {
+	_AWS=$1
+	#_PROFILE=$2
+	_VPC=$2
+
+	_RTLIST=$(${_AWS} ec2 describe-route-tables --filter Name=vpc-id,Values=${_VPC} | jq -f ${JQ_DIR}/unfold-tags.jq)
+	case $(jq '. | length' <<< ${_RTLIST}) in
+		0)
+			fatal "No route table found for ${_VPC}"
+			;;
+		1)
+			jq -r '.[0].RouteTableId' <<< ${_RTLIST}
+			;;
+		*)
+			echo "Multiple routing tables found for ${_VPC}" >&2
+			echo "Choose one and pass it to the script as ${_VPC}/rtb-SoMeThInG" >&2
+			jq -r -f ${JQ_DIR}/describe-rt.list.jq <<< ${_RTLIST} >&2
+			exit 1
+			;;
+	esac
+}
+
 SOURCE_PROFILE=$1
 SOURCE_VPC_RT=$2
 TARGET_PROFILE=$3
@@ -53,17 +80,17 @@ fi
 
 test "${SOURCE_VPC_RT}" == "--list" -o "${TARGET_VPC_RT}" == "--list" && exit 1
 
-SOURCE_VPC=${SOURCE_VPC_RT/\/*/}
-SOURCE_RT=${SOURCE_VPC_RT/*\//}
+read SOURCE_VPC SOURCE_RT <<< ${SOURCE_VPC_RT/\// }
+read TARGET_VPC TARGET_RT <<< ${TARGET_VPC_RT/\// }
 
-TARGET_VPC=${TARGET_VPC_RT/\/*/}
-TARGET_RT=${TARGET_VPC_RT/*\//}
-
-if [ -z "${SOURCE_VPC}" -o -z "${SOURCE_RT}" -o -z "${TARGET_VPC}" -o -z "${TARGET_RT}" ]; then
-	echo "Source or Target VPC ID or RouteTable ID is missing."
-	echo "Please use vpc-abcd/rt-1234 form for both source and target accounts."
+if [ -z "${SOURCE_VPC}" -o -z "${TARGET_VPC}" ]; then
+	echo "Source or Target VPC ID is missing."
+	echo "Please use vpc-abcd[/rt-1234] form for both source and target accounts."
 	exit 1
 fi
+
+test -z "${SOURCE_RT}" && SOURCE_RT=$(get_routetable "${SOURCE_AWS}" ${SOURCE_VPC})
+test -z "${TARGET_RT}" && TARGET_RT=$(get_routetable "${TARGET_AWS}" ${TARGET_VPC})
 
 echo "Working on it, please be patient..."
 
