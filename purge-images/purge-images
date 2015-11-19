@@ -1,0 +1,116 @@
+#!/bin/bash
+
+# Purge Images (AMI) created with 'aws ec2 create-image' call
+
+# Author: Michal Ludvig <michal.ludvig@enterpriseit.co.nz>
+
+function show_help() {
+	cat << __EOF__
+Usage: $0 [-h] [options]
+
+Create VPC and Subnets as defined in a config file.
+
+   -l           List only. Apply below filters and display what
+                would be deleted.
+
+   -d DATE
+   -t TIMESTAMP Date in ISO8601 format or Timestamp since the Unix
+                Epoch (1970-01-01T00:00:00Z in ISO8601 format).
+                Can be prepended with '<' to delete images older
+                than this, or with '>' to delete newer images, or
+                with '=' to delete exactly that one image.
+                Alternatively "-d now" can be used to list all images
+                (i.e. images older than now).
+
+   -a AMI-ID    AMI ID to remove.
+
+   -n NAME_REGEXP
+                The AMI Name or Description must match NAME_REGEXP.
+
+   -p PROFILE   AWS-CLI Profile name as defined in ~/.aws/config.
+                Optional, will use default or instance meta-data if
+                not specified.
+
+   -h           Display help.
+
+__EOF__
+	exit 1
+}
+
+function fatal() {
+	echo $1 >&2
+	exit 1
+}
+
+AWS=$(which aws 2>/dev/null)
+
+test -z "${AWS}" && fatal "The 'aws' utility not found. Please install it or add its location to \$PATH"
+
+while getopts "a:d:n:lp:t:h" OPT; do
+	case "${OPT}" in
+	a)
+		AMI_ID="${OPTARG}"
+		;;
+	d)
+		DATE="${OPTARG}"
+		;;
+	n)
+		NAME="${OPTARG}"
+		;;
+	l)
+		LIST_ONLY=1
+		;;
+	p)
+		AWS="${AWS} --profile=${OPTARG}"
+		;;
+	t)
+		TIMESTAMP="${OPTARG}"
+		;;
+	h)
+		show_help
+		;;
+	esac
+done
+
+# Normalise date
+test -n "${TIMESTAMP}" && TIMESTAMP=$(date +%s --date "@${TIMESTAMP}")
+test -n "${DATE}" && TIMESTAMP=$(date +%s --date "${DATE}")
+test -z "${TIMESTAMP}" && fatal "No date given, use -d or -t parameter. Or -h for help."
+
+echo "Getting ready, this may take a while..."
+
+IMAGES_JSON=$(${AWS} ec2 describe-images --owners=self ${AMI_ID:+ --filters Name=image-id,Values=${AMI_ID}})
+
+# Filter images by date and InstanceId
+IMAGES_JSON=$(jq -r "[.Images[]
+	| {
+		ImageId: .ImageId,
+		CreationDate: .CreationDate,
+		CreationDateSec: .CreationDate|strptime(\"%Y-%m-%dT%H:%M:%S.000Z\")|mktime,
+		Name: .Name,
+		Description: .Description,
+		Snapshots: [ .BlockDeviceMappings[].Ebs.SnapshotId ],
+		SnapshotsSize: [ .BlockDeviceMappings[].Ebs.VolumeSize ] | add
+	}
+	| select(.CreationDateSec < ${TIMESTAMP} ${NAME:+ and ((.Name | test(\"${NAME}\")) or (.Description | test(\"${NAME}\"))) })]" <<< ${IMAGES_JSON})
+
+if [ -n "${LIST_ONLY}" ]; then
+	jq -r '.[] | @text "\(.ImageId)   \(.CreationDate)   \(.Name)   \(.SnapshotsSize) GB"' <<< ${IMAGES_JSON}
+	exit 0
+fi
+
+echo "Deleting $(jq -r '. | length' <<< ${IMAGES_JSON}) images ..."
+
+AMIS=$(jq -r '.[].ImageId' <<< ${IMAGES_JSON})
+
+set -e
+
+for AMI in ${AMIS}; do
+	echo -n "Deleting: ${AMI}"
+	${AWS} ec2 deregister-image --image-id ${AMI}
+	for SNAP in $(jq -r ".[] | select(.ImageId == \"${AMI}\") | .Snapshots[]" <<< ${IMAGES_JSON}); do
+		echo -n " ${SNAP}"
+		${AWS} ec2 delete-snapshot --snapshot-id ${SNAP}
+	done
+	echo
+done
