@@ -76,7 +76,7 @@ done
 # Normalise date
 test -n "${TIMESTAMP}" && TIMESTAMP=$(date +%s --date "@${TIMESTAMP}")
 test -n "${DATE}" && TIMESTAMP=$(date +%s --date "${DATE}")
-test -z "${TIMESTAMP}" && fatal "No date given, use -d or -t parameter. Or -h for help."
+test -z "${TIMESTAMP}" && TIMESTAMP=$(date +%s)
 
 echo "Getting ready, this may take a while..."
 
@@ -93,7 +93,8 @@ IMAGES_JSON=$(${JQ} -r "[.Images[]
 		Snapshots: [ .BlockDeviceMappings[].Ebs.SnapshotId ],
 		SnapshotsSize: [ .BlockDeviceMappings[].Ebs.VolumeSize ] | add
 	}
-	| select(.CreationDateSec < ${TIMESTAMP} ${NAME:+ and ((.Name | test(\"${NAME}\")) or (.Description | test(\"${NAME}\"))) })]" <<< ${IMAGES_JSON})
+	| select(.CreationDateSec < ${TIMESTAMP} ${NAME:+ and ((.Name | test(\"${NAME}\")) or (.Description | test(\"${NAME}\"))) })]
+	| sort_by(.CreationDateSec)" <<< ${IMAGES_JSON})
 
 if [ -z "${YES_DELETE}" ]; then
 	${JQ} -r '.[] | @text "\(.ImageId)   \(.CreationDate)   \(.Name)   \(.SnapshotsSize) GB"' <<< ${IMAGES_JSON}
