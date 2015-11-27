@@ -43,8 +43,10 @@ function fatal() {
 }
 
 AWS=$(which aws 2>/dev/null)
-
 test -z "${AWS}" && fatal "The 'aws' utility not found. Please install it or add its location to \$PATH"
+
+JQ=$(which jq 2>/dev/null)
+test -z "${JQ}" && fatal "The 'jq' utility not found. Please install it or add its location to \$PATH"
 
 while getopts "a:d:n:p:t:yh" OPT; do
 	case "${OPT}" in
@@ -82,7 +84,7 @@ echo "Getting ready, this may take a while..."
 IMAGES_JSON=$(${AWS} ec2 describe-images --owners=self ${AMI_ID:+ --filters Name=image-id,Values=${AMI_ID}})
 
 # Filter images by date and InstanceId
-IMAGES_JSON=$(jq -r "[.Images[]
+IMAGES_JSON=$(${JQ} -r "[.Images[]
 	| {
 		ImageId: .ImageId,
 		CreationDate: .CreationDate,
@@ -95,20 +97,20 @@ IMAGES_JSON=$(jq -r "[.Images[]
 	| select(.CreationDateSec < ${TIMESTAMP} ${NAME:+ and ((.Name | test(\"${NAME}\")) or (.Description | test(\"${NAME}\"))) })]" <<< ${IMAGES_JSON})
 
 if [ -z "${YES_DELETE}" ]; then
-	jq -r '.[] | @text "\(.ImageId)   \(.CreationDate)   \(.Name)   \(.SnapshotsSize) GB"' <<< ${IMAGES_JSON}
+	${JQ} -r '.[] | @text "\(.ImageId)   \(.CreationDate)   \(.Name)   \(.SnapshotsSize) GB"' <<< ${IMAGES_JSON}
 	exit 0
 fi
 
-echo "Deleting $(jq -r '. | length' <<< ${IMAGES_JSON}) images ..."
+echo "Deleting $(${JQ} -r '. | length' <<< ${IMAGES_JSON}) images ..."
 
-AMIS=$(jq -r '.[].ImageId' <<< ${IMAGES_JSON})
+AMIS=$(${JQ} -r '.[].ImageId' <<< ${IMAGES_JSON})
 
 set -e
 
 for AMI in ${AMIS}; do
 	echo -n "Deleting: ${AMI}"
 	${AWS} ec2 deregister-image --image-id ${AMI}
-	for SNAP in $(jq -r ".[] | select(.ImageId == \"${AMI}\") | .Snapshots[]" <<< ${IMAGES_JSON}); do
+	for SNAP in $(${JQ} -r ".[] | select(.ImageId == \"${AMI}\") | .Snapshots[]" <<< ${IMAGES_JSON}); do
 		echo -n " ${SNAP}"
 		${AWS} ec2 delete-snapshot --snapshot-id ${SNAP}
 	done
