@@ -2,22 +2,20 @@
 
 # Purge Images (AMI) created with 'aws ec2 create-image' call
 
-# Author: Michal Ludvig <michal.ludvig@enterpriseit.co.nz>
+# Author:   Michal Ludvig <mludvig@logix.net.nz>
+# License:  BSD
+# Homepage: https://aws.nz/aws-utils/purge-images
 
 function show_help() {
 	cat << __EOF__
 Usage: $0 [-h] [options]
 
-Create VPC and Subnets as defined in a config file.
+Purge AMI (Images) older than a given date, optionally matching certain
+filters.
 
-   -d DATE
-   -t TIMESTAMP Date in ISO8601 format or Timestamp since the Unix
-                Epoch (1970-01-01T00:00:00Z in ISO8601 format).
-                Can be prepended with '<' to delete images older
-                than this, or with '>' to delete newer images, or
-                with '=' to delete exactly that one image.
-                Alternatively "-d now" can be used to list all images
-                (i.e. images older than now).
+   -d DATE      Date or Timestamp since the Unix Epoch. Images older
+   -t TIMESTAMP than this will be deleted. DATE can be any date format
+                accepted by GNU date(1) command, e.g. "3 days ago".
 
    -a AMI-ID    AMI ID to remove.
 
@@ -33,6 +31,7 @@ Create VPC and Subnets as defined in a config file.
 
    -h           Display help.
 
+Visit https://aws.nz/aws-utils/purge-images for more info and examples.
 __EOF__
 	exit 1
 }
