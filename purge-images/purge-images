@@ -10,9 +10,6 @@ Usage: $0 [-h] [options]
 
 Create VPC and Subnets as defined in a config file.
 
-   -l           List only. Apply below filters and display what
-                would be deleted.
-
    -d DATE
    -t TIMESTAMP Date in ISO8601 format or Timestamp since the Unix
                 Epoch (1970-01-01T00:00:00Z in ISO8601 format).
@@ -26,6 +23,9 @@ Create VPC and Subnets as defined in a config file.
 
    -n NAME_REGEXP
                 The AMI Name or Description must match NAME_REGEXP.
+
+   -y           Yes, delete. Without this parameter the script only
+                displays what would be deleted.
 
    -p PROFILE   AWS-CLI Profile name as defined in ~/.aws/config.
                 Optional, will use default or instance meta-data if
@@ -46,7 +46,7 @@ AWS=$(which aws 2>/dev/null)
 
 test -z "${AWS}" && fatal "The 'aws' utility not found. Please install it or add its location to \$PATH"
 
-while getopts "a:d:n:lp:t:h" OPT; do
+while getopts "a:d:n:p:t:yh" OPT; do
 	case "${OPT}" in
 	a)
 		AMI_ID="${OPTARG}"
@@ -57,14 +57,14 @@ while getopts "a:d:n:lp:t:h" OPT; do
 	n)
 		NAME="${OPTARG}"
 		;;
-	l)
-		LIST_ONLY=1
-		;;
 	p)
 		AWS="${AWS} --profile=${OPTARG}"
 		;;
 	t)
 		TIMESTAMP="${OPTARG}"
+		;;
+	y)
+		YES_DELETE=1
 		;;
 	h)
 		show_help
@@ -94,7 +94,7 @@ IMAGES_JSON=$(jq -r "[.Images[]
 	}
 	| select(.CreationDateSec < ${TIMESTAMP} ${NAME:+ and ((.Name | test(\"${NAME}\")) or (.Description | test(\"${NAME}\"))) })]" <<< ${IMAGES_JSON})
 
-if [ -n "${LIST_ONLY}" ]; then
+if [ -z "${YES_DELETE}" ]; then
 	jq -r '.[] | @text "\(.ImageId)   \(.CreationDate)   \(.Name)   \(.SnapshotsSize) GB"' <<< ${IMAGES_JSON}
 	exit 0
 fi
