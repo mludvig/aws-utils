@@ -54,10 +54,14 @@ function fatal() {
 AWS=$(which aws 2>/dev/null)
 test -z "${AWS}" && fatal "The 'aws' utility not found. Please install it or add its location to \$PATH"
 
+JQ=$(which jq 2>/dev/null)
+test -z "${JQ}" && fatal "The 'jq' utility not found. Please install it or add its location to \$PATH"
+
 while getopts "c:g:hlp:r:" OPT; do
 	case "${OPT}" in
 	c)
 		ROLES_CSV="${OPTARG}"
+		test -f "${ROLES_CSV}" || fatal "Error: -c ${ROLES_CSV}: File not found"
 		;;
 	g)
 		AWS="${AWS} --region=${OPTARG}"
@@ -105,7 +109,7 @@ unset AWS_SECRET_ACCESS_KEY
 unset AWS_SESSION_TOKEN
 unset AWS_SECURITY_TOKEN
 
-eval $(${AWS} sts assume-role --role-arn ${ROLE_ARN} --role-session-name ${ROLE_NAME}_$(date +%s) --duration-seconds 900 | jq -r '
+eval $(${AWS} sts assume-role --role-arn ${ROLE_ARN} --role-session-name ${ROLE_NAME}_$(date +%s) --duration-seconds 900 | ${JQ} -r '
 	@text "export AWS_ACCESS_KEY_ID=\"\(.Credentials.AccessKeyId)\"",
 	@text "export AWS_SECRET_ACCESS_KEY=\"\(.Credentials.SecretAccessKey)\"",
 	@text "export AWS_SESSION_TOKEN=\"\(.Credentials.SessionToken)\"",
