@@ -16,7 +16,7 @@ export JQ_DIR=${SCRIPTS_DIR}/../jq
 
 function show_help() {
 	cat << __EOF__
-Usage: $0 -r ROLENAME|ARN  [-c ROLES.CSV]  [-p PROFILE] [-l] [-h] [--] [COMMAND [ARGS]]
+Usage: $(basename $0) -r ROLENAME|ARN  [OPTIONS] [--] [COMMAND [ARGS]]
 
 Assume Credentials from another IAM Role and either print them
 in a form suitable for eval(1) or run 'command' with these
@@ -38,6 +38,10 @@ Credentials in the environment.
    -r ROLENAME or -r ARN
                 Name of IAM Role from ROLES.CSV or IAM Role ARN to assume.
 
+   -s SECONDS   Generated credentials will be valid for given number
+                of SECONDS. Minimum is 900 (=15 minutes), max 3600 (=1 hour).
+		Default is 900.
+
    -l           List role names from ROLES.CSV
 
    -h           Display help.
@@ -57,7 +61,8 @@ test -z "${AWS}" && fatal "The 'aws' utility not found. Please install it or add
 JQ=$(which jq 2>/dev/null)
 test -z "${JQ}" && fatal "The 'jq' utility not found. Please install it or add its location to \$PATH"
 
-while getopts "c:g:hlp:r:" OPT; do
+VALIDITY_SECONDS=900
+while getopts "c:g:hlp:r:s:" OPT; do
 	case "${OPT}" in
 	c)
 		ROLES_CSV="${OPTARG}"
@@ -71,6 +76,11 @@ while getopts "c:g:hlp:r:" OPT; do
 		;;
 	r)
 		ROLE_NAME="${OPTARG}"
+		;;
+	s)
+		VALIDITY_SECONDS="${OPTARG}"
+		test "${VALIDITY_SECONDS}" -ge 900 -a "${VALIDITY_SECONDS}" -le 3600 || \
+			fatal "Error: -s ${VALIDITY_SECONDS}: Must be from 900 to 3600 seconds"
 		;;
 	l)
 		LIST=1
@@ -109,7 +119,7 @@ unset AWS_SECRET_ACCESS_KEY
 unset AWS_SESSION_TOKEN
 unset AWS_SECURITY_TOKEN
 
-eval $(${AWS} sts assume-role --role-arn ${ROLE_ARN} --role-session-name ${ROLE_NAME}_$(date +%s) --duration-seconds 900 | ${JQ} -r '
+eval $(${AWS} sts assume-role --role-arn ${ROLE_ARN} --role-session-name ${ROLE_NAME}_$(date +%s) --duration-seconds ${VALIDITY_SECONDS} | ${JQ} -r '
 	@text "export AWS_ACCESS_KEY_ID=\"\(.Credentials.AccessKeyId)\"",
 	@text "export AWS_SECRET_ACCESS_KEY=\"\(.Credentials.SecretAccessKey)\"",
 	@text "export AWS_SESSION_TOKEN=\"\(.Credentials.SessionToken)\"",
