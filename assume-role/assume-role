@@ -22,6 +22,10 @@ Assume Credentials from another IAM Role and either print them
 in a form suitable for eval(1) or run 'command' with these
 Credentials in the environment.
 
+By default only AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and
+where applicable AWS_SESSION_TOKEN variables are emitted.
+See -B for a backward compatibility with older scripts and libs.
+
    COMMAND      Run the COMMAND with ARGS using the assumed IAM Role's creds.
                 Prepend '--' if the command has arguments starting with '-'.
 
@@ -44,7 +48,12 @@ Credentials in the environment.
 
    -l           List role names from ROLES.CSV
 
+   -B           Backward compatibility for old Boto and other programs. Emits
+                the keys in now-obsolete variables like AWS_SECURITY_TOKEN.
+
    -h           Display help.
+
+Visit https://aws.nz/aws-utils/assume-role for more info and usage examples.
 
 __EOF__
 	exit 1
@@ -55,14 +64,14 @@ function fatal() {
 	exit 1
 }
 
-AWS=$(which aws 2>/dev/null)
+AWS=$(which aws 2>/dev/null) || true
 test -z "${AWS}" && fatal "The 'aws' utility not found. Please install it or add its location to \$PATH"
 
-JQ=$(which jq 2>/dev/null)
+JQ=$(which jq 2>/dev/null) || true
 test -z "${JQ}" && fatal "The 'jq' utility not found. Please install it or add its location to \$PATH"
 
 VALIDITY_SECONDS=900
-while getopts "c:g:hlp:r:s:" OPT; do
+while getopts "c:g:hlp:r:s:B" OPT; do
 	case "${OPT}" in
 	c)
 		ROLES_CSV="${OPTARG}"
@@ -84,6 +93,9 @@ while getopts "c:g:hlp:r:s:" OPT; do
 		;;
 	l)
 		LIST=1
+		;;
+	B)
+		BACKWARD_COMPAT=1
 		;;
 	h)
 		show_help
@@ -117,20 +129,31 @@ fi
 unset AWS_ACCESS_KEY_ID
 unset AWS_SECRET_ACCESS_KEY
 unset AWS_SESSION_TOKEN
+
+# Obsolete variables - unset them anyway to prevent credentials mismatch
+# See below for emitting them again
 unset AWS_SECURITY_TOKEN
 
-eval $(${AWS} sts assume-role --role-arn ${ROLE_ARN} --role-session-name ${ROLE_NAME}_$(date +%s) --duration-seconds ${VALIDITY_SECONDS} | ${JQ} -r '
+ROLE_JSON=$(${AWS} sts assume-role --role-arn ${ROLE_ARN} --role-session-name ${ROLE_NAME}_$(date +%s) --duration-seconds ${VALIDITY_SECONDS})
+
+eval $(${JQ} -r '
 	@text "export AWS_ACCESS_KEY_ID=\"\(.Credentials.AccessKeyId)\"",
 	@text "export AWS_SECRET_ACCESS_KEY=\"\(.Credentials.SecretAccessKey)\"",
-	@text "export AWS_SESSION_TOKEN=\"\(.Credentials.SessionToken)\"",
-	@text "export AWS_SECURITY_TOKEN=\"\(.Credentials.SessionToken)\""
-')
+	@text "export AWS_SESSION_TOKEN=\"\(.Credentials.SessionToken)\""
+' <<< ${ROLE_JSON})
 
 if [ $# -gt 0 ]; then
+	if [ "${BACKWARD_COMPAT}" = "1" ]; then
+		export AWS_SECURITY_TOKEN="${AWS_SESSION_TOKEN}"
+		# Add more backwards-compatible aliases if needed
+	fi
 	exec $*
 else
 	echo "export AWS_ACCESS_KEY_ID=\"${AWS_ACCESS_KEY_ID}\""
 	echo "export AWS_SECRET_ACCESS_KEY=\"${AWS_SECRET_ACCESS_KEY}\""
 	echo "export AWS_SESSION_TOKEN=\"${AWS_SESSION_TOKEN}\""
-	echo "export AWS_SECURITY_TOKEN=\"${AWS_SECURITY_TOKEN}\""
+	if [ "${BACKWARD_COMPAT}" = "1" ]; then
+		echo "export AWS_SECURITY_TOKEN=\"${AWS_SESSION_TOKEN}\""
+		# Add more backwards-compatible aliases if needed
+	fi
 fi
