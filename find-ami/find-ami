@@ -1,0 +1,123 @@
+#!/bin/bash
+
+# find-ami - Find the latest AMI based on region, description, name, etc.
+#
+# Author:   Michal Ludvig <mludvig@logix.net.nz>
+# License:  BSD
+# Homepage: https://aws.nz/aws-utils/find-ami
+
+function show_help() {
+	cat << __EOF__
+Usage: $0 [-h] [options]
+
+Purge AMI (Images) older than a given date, optionally matching certain
+filters.
+
+   -d AMI-ID    Describe AMI details (Name, Owner, etc)
+
+   -n NAME      AMI Name, can be regexp.
+                E.g: amzn-ami-hvm-[^-]*-gp2
+
+   -o OWNER     AMI Owner, can be 'amazon' or numeric owner ID.
+
+   -p PROFILE   AWS-CLI Profile name as defined in ~/.aws/config.
+                Optional, will use default or instance meta-data if
+                not specified.
+
+   -r REGION    AWS Region where to look for the AMI.
+
+   -t VIRT_TYPE Virtualization type:
+                * hvm (default)
+                * paravirtual
+
+   -x PRESET    Name/Description/Owner preset for common AMIs:
+                * amazon-linux
+		* bitnami-wordpress
+
+   -h           Display help.
+
+Visit https://aws.nz/aws-utils/find-ami for more info and examples.
+__EOF__
+}
+
+function fatal() {
+	echo $1 >&2
+	exit 1
+}
+
+AWS=$(which aws 2>/dev/null)
+test -z "${AWS}" && fatal "The 'aws' utility not found. Please install it or add its location to \$PATH"
+
+JQ=$(which jq 2>/dev/null)
+test -z "${JQ}" && fatal "The 'jq' utility not found. Please install it or add its location to \$PATH"
+
+export VIRT_TYPE="hvm"
+
+while getopts "d:n:o:p:r:x:h" OPT; do
+	case "${OPT}" in
+	d)
+		DESCRIBE_AMI="${OPTARG}"
+		;;
+	n)
+		NAME="${OPTARG}"
+		;;
+	o)
+		OWNER="${OPTARG}"
+		;;
+	p)
+		AWS="${AWS} --profile=${OPTARG}"
+		;;
+	r)
+		AWS="${AWS} --region=${OPTARG}"
+		;;
+	t)
+		VIRT_TYPE="${OPTARG}"
+		;;
+	x)
+		PRESET="${OPTARG}"
+		;;
+	h)
+		show_help
+		;;
+	esac
+done
+
+if [ -n "${DESCRIBE_AMI}" ]; then
+	IMAGES_JSON=$(${AWS} ec2 describe-images --filter Name=image-id,Values=${DESCRIBE_AMI})
+	${JQ} -r ".Images[] |
+		@text \"OWNER: \(.OwnerId)\",
+		@text \"NAME:  \(.Name)\",
+		@text \"DESC:  \(.Description)\",
+		@text \"VIRT:  \(.VirtualizationType)\"
+	" <<< ${IMAGES_JSON}
+	exit 0
+fi
+
+if [ -n "${PRESET}" ]; then
+	case "${PRESET}" in
+	amazon-linux)
+		OWNER="amazon"
+		NAME="amzn-ami-[^-]*-[^-]*-gp2"
+		;;
+	bitnami-wordpress)
+		OWNER="679593333241"
+		NAME="bitnami-wordpress-.*"
+		;;
+	*)
+		fatal "Preset ID '${PRESET}' isn't configured."
+		;;
+	esac
+fi
+
+IMAGES_JSON=$(${AWS} ec2 describe-images --owners=${OWNER} --filter Name=virtualization-type,Values=${VIRT_TYPE})
+
+# Filter images by date and InstanceId
+${JQ} -r "[.Images[]
+	| select(.Name | test(\"${NAME}\"))
+	] | max_by(.CreationDate) |
+	@text \"export AMI_ID='\(.ImageId)'\",
+	@text \"export AMI_NAME='\(.Name)'\",
+	@text \"export AMI_OWNER='\(.OwnerId)'\",
+	@text \"export AMI_DESCRIPTION='\(.Description)'\",
+	@text \"export AMI_VIRT_TYPE='\(.VirtualizationType)'\"
+	" <<< ${IMAGES_JSON}
