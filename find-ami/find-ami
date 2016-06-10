@@ -15,6 +15,9 @@ filters.
 
    -d AMI-ID    Describe AMI details (Name, Owner, etc)
 
+   -l           List all AMIs matching the NAME and OWNER.
+                By default only the newest one is returned.
+
    -n NAME      AMI Name, can be regexp.
                 E.g: amzn-ami-hvm-[^-]*-gp2
 
@@ -51,12 +54,16 @@ test -z "${AWS}" && fatal "The 'aws' utility not found. Please install it or add
 JQ=$(which jq 2>/dev/null)
 test -z "${JQ}" && fatal "The 'jq' utility not found. Please install it or add its location to \$PATH"
 
-export VIRT_TYPE="hvm"
+VIRT_TYPE="hvm"
+LIST_ALL=0
 
-while getopts "d:n:o:p:r:x:h" OPT; do
+while getopts "d:ln:o:p:r:x:h" OPT; do
 	case "${OPT}" in
 	d)
 		DESCRIBE_AMI="${OPTARG}"
+		;;
+	l)
+		LIST_ALL=1
 		;;
 	n)
 		NAME="${OPTARG}"
@@ -109,15 +116,25 @@ if [ -n "${PRESET}" ]; then
 	esac
 fi
 
+echo "# Please wait, this may take a few minutes to run..."
 IMAGES_JSON=$(${AWS} ec2 describe-images --owners=${OWNER} --filter Name=virtualization-type,Values=${VIRT_TYPE})
 
-# Filter images by date and InstanceId
-${JQ} -r "[.Images[]
-	| select(.Name | test(\"${NAME}\"))
-	] | max_by(.CreationDate) |
-	@text \"export AMI_ID='\(.ImageId)'\",
-	@text \"export AMI_NAME='\(.Name)'\",
-	@text \"export AMI_OWNER='\(.OwnerId)'\",
-	@text \"export AMI_DESCRIPTION='\(.Description)'\",
-	@text \"export AMI_VIRT_TYPE='\(.VirtualizationType)'\"
-	" <<< ${IMAGES_JSON}
+if [ "${LIST_ALL}" = "1" ]; then
+	# List all matching AMIs
+	${JQ} -r "[.Images[]
+		| select(.Name | test(\"${NAME}\"))
+		] | sort_by(.CreationDate) | reverse | .[] |
+		@text \"\(.ImageId)    \(.CreationDate)    \(.Name)\"
+		" <<< ${IMAGES_JSON}
+else
+	# Sort AMIs by date and display only the newest one
+	${JQ} -r "[.Images[]
+		| select(.Name | test(\"${NAME}\"))
+		] | max_by(.CreationDate) |
+		@text \"export AMI_ID='\(.ImageId)'\",
+		@text \"export AMI_NAME='\(.Name)'\",
+		@text \"export AMI_OWNER='\(.OwnerId)'\",
+		@text \"export AMI_DESCRIPTION='\(.Description)'\",
+		@text \"export AMI_VIRT_TYPE='\(.VirtualizationType)'\"
+		" <<< ${IMAGES_JSON}
+fi
