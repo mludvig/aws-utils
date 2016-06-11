@@ -22,10 +22,6 @@ Assume Credentials from another IAM Role and either print them
 in a form suitable for eval(1) or run 'command' with these
 Credentials in the environment.
 
-By default only AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and
-where applicable AWS_SESSION_TOKEN variables are emitted.
-See -B for a backward compatibility with older scripts and libs.
-
    COMMAND      Run the COMMAND with ARGS using the assumed IAM Role's creds.
                 Prepend '--' if the command has arguments starting with '-'.
 
@@ -44,12 +40,9 @@ See -B for a backward compatibility with older scripts and libs.
 
    -s SECONDS   Generated credentials will be valid for given number
                 of SECONDS. Minimum is 900 (=15 minutes), max 3600 (=1 hour).
-		Default is 900.
+		Default is 3600.
 
    -l           List role names from ROLES.CSV
-
-   -B           Backward compatibility for old Boto and other programs. Emits
-                the keys in now-obsolete variables like AWS_SECURITY_TOKEN.
 
    -h           Display help.
 
@@ -70,8 +63,8 @@ test -z "${AWS}" && fatal "The 'aws' utility not found. Please install it or add
 JQ=$(which jq 2>/dev/null) || true
 test -z "${JQ}" && fatal "The 'jq' utility not found. Please install it or add its location to \$PATH"
 
-VALIDITY_SECONDS=900
-while getopts "c:g:hlp:r:s:B" OPT; do
+VALIDITY_SECONDS=3600
+while getopts "c:g:hlp:r:s:" OPT; do
 	case "${OPT}" in
 	c)
 		ROLES_CSV="${OPTARG}"
@@ -93,9 +86,6 @@ while getopts "c:g:hlp:r:s:B" OPT; do
 		;;
 	l)
 		LIST=1
-		;;
-	B)
-		BACKWARD_COMPAT=1
 		;;
 	h)
 		show_help
@@ -143,17 +133,10 @@ eval $(${JQ} -r '
 ' <<< ${ROLE_JSON})
 
 if [ $# -gt 0 ]; then
-	if [ "${BACKWARD_COMPAT}" = "1" ]; then
-		export AWS_SECURITY_TOKEN="${AWS_SESSION_TOKEN}"
-		# Add more backwards-compatible aliases if needed
-	fi
 	exec $*
 else
 	echo "export AWS_ACCESS_KEY_ID=\"${AWS_ACCESS_KEY_ID}\""
 	echo "export AWS_SECRET_ACCESS_KEY=\"${AWS_SECRET_ACCESS_KEY}\""
 	echo "export AWS_SESSION_TOKEN=\"${AWS_SESSION_TOKEN}\""
-	if [ "${BACKWARD_COMPAT}" = "1" ]; then
-		echo "export AWS_SECURITY_TOKEN=\"${AWS_SESSION_TOKEN}\""
-		# Add more backwards-compatible aliases if needed
-	fi
+	echo "export AWS_SECURITY_TOKEN=\"${AWS_SESSION_TOKEN}\""
 fi
