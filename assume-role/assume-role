@@ -126,17 +126,16 @@ unset AWS_SECURITY_TOKEN
 
 ROLE_JSON=$(${AWS} sts assume-role --role-arn ${ROLE_ARN} --role-session-name ${ROLE_NAME}_$(date +%s) --duration-seconds ${VALIDITY_SECONDS})
 
-eval $(${JQ} -r '
+AWS_ENV_VARS=$(${JQ} -r '
 	@text "export AWS_ACCESS_KEY_ID=\"\(.Credentials.AccessKeyId)\"",
 	@text "export AWS_SECRET_ACCESS_KEY=\"\(.Credentials.SecretAccessKey)\"",
-	@text "export AWS_SESSION_TOKEN=\"\(.Credentials.SessionToken)\""
+	@text "export AWS_SESSION_TOKEN=\"\(.Credentials.SessionToken)\"",
+	@text "export AWS_SECURITY_TOKEN=\"\(.Credentials.SessionToken)\""
 ' <<< ${ROLE_JSON})
 
 if [ $# -gt 0 ]; then
+	eval "${AWS_ENV_VARS}"
 	exec $*
 else
-	echo "export AWS_ACCESS_KEY_ID=\"${AWS_ACCESS_KEY_ID}\""
-	echo "export AWS_SECRET_ACCESS_KEY=\"${AWS_SECRET_ACCESS_KEY}\""
-	echo "export AWS_SESSION_TOKEN=\"${AWS_SESSION_TOKEN}\""
-	echo "export AWS_SECURITY_TOKEN=\"${AWS_SESSION_TOKEN}\""
+	echo "${AWS_ENV_VARS}"
 fi
