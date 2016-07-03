@@ -1,9 +1,6 @@
 ---
 vpc_name: %vpcname%
 
-domain_name_private: "{{vpc_name}}.private"
-domain_name_public: "{{vpc_name}}.example.com"
-
 vpc_cidr: %cidr%/20
 
 mgmt_cidr: %cidr+0.0.12.0%/23
