@@ -1,0 +1,49 @@
+---
+vpc_name: %vpcname%
+
+domain_name_private: "{{vpc_name}}.private"
+domain_name_public: "{{vpc_name}}.example.com"
+
+vpc_cidr: %cidr%/20
+
+mgmt_cidr: %cidr+0.0.12.0%/23
+mgmt_dmz_cidr: %cidr+0.0.12.0%/24
+mgmt_dmz_subnets: %cidr+0.0.12.0%/26, %cidr+0.0.12.64%/26, %cidr+0.0.12.128%/26
+mgmt_private_cidr: %cidr+0.0.13.0%/24
+mgmt_private_subnets: %cidr+0.0.13.0%/26, %cidr+0.0.13.64%/26, %cidr+0.0.13.128%/26
+# unused: %cidr+0.0.16.192%/26
+
+envs:
+  dev:
+    name: "{{vpc_name}}-dev"		# "{{vpc_name}}" will be replaced by Ansible
+    cidr: %cidr+0.0.0.0%/22
+    dmz_cidr: %cidr+0.0.0.0%/24
+    dmz_subnets: %cidr+0.0.0.0%/26, %cidr+0.0.0.64%/26, %cidr+0.0.0.128%/26
+    logic_cidr: %cidr+0.0.1.0%/24
+    logic_subnets: %cidr+0.0.1.0%/26, %cidr+0.0.1.64%/26, %cidr+0.0.1.128%/26
+    data_cidr: %cidr+0.0.2.0%/24
+    data_subnets: %cidr+0.0.2.0%/26, %cidr+0.0.2.64%/26, %cidr+0.0.2.128%/26
+    # unused: %cidr+0.0.0.192%/26, %cidr+0.0.1.192%/26, %cidr+0.0.2.192%/26, %cidr+0.0.3.0%/24
+
+  test:
+    name: "{{vpc_name}}-test"
+    cidr: %cidr+0.0.4.0%/22
+    dmz_cidr: %cidr+0.0.4.0%/24
+    dmz_subnets: %cidr+0.0.4.0%/26, %cidr+0.0.4.64%/26, %cidr+0.0.4.128%/26
+    logic_cidr: %cidr+0.0.5.0%/24
+    logic_subnets: %cidr+0.0.5.0%/26, %cidr+0.0.5.64%/26, %cidr+0.0.5.128%/26
+    data_cidr: %cidr+0.0.6.0%/24
+    data_subnets: %cidr+0.0.6.0%/26, %cidr+0.0.6.64%/26, %cidr+0.0.6.128%/26
+    # unused: %cidr+0.0.7.0%/24, %cidr+0.0.4.192%/26, %cidr+0.0.5.192%/26, %cidr+0.0.6.192%/26
+
+  prod:
+    name: "{{vpc_name}}-prod"
+    cidr: %cidr+0.0.8.0%/22
+    dmz_cidr: %cidr+0.0.8.0%/24
+    dmz_subnets: %cidr+0.0.8.0%/26, %cidr+0.0.8.64%/26, %cidr+0.0.8.128%/26
+    logic_cidr: %cidr+0.0.9.0%/24
+    logic_subnets: %cidr+0.0.9.0%/26, %cidr+0.0.9.64%/26, %cidr+0.0.9.128%/26
+    data_cidr: %cidr+0.0.10.0%/24
+    data_subnets: %cidr+0.0.10.0%/26, %cidr+0.0.10.64%/26, %cidr+0.0.10.128%/26
+    # unused: %cidr+0.0.11.0%/24, %cidr+0.0.8.192%/26, %cidr+0.0.9.192%/26, %cidr+0.0.10.192%/26
+
