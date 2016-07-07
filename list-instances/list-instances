@@ -1,0 +1,15 @@
+#!/bin/sh
+
+# By Michael Ludvig <mludvig@logix.net.nz> (c) 2016
+# License: GPLv3
+
+# List running instances and group them by Name
+# Useful for AutoScaling groups, etc.
+# Best to be placed in profile.d
+
+set -e
+
+export SCRIPTS_DIR=$(dirname $0)
+test -z "${SCRIPTS_DIR}" && SCRIPTS_DIR=$(dirname $(which $0))
+
+aws ec2 describe-instances | jq -f ${SCRIPTS_DIR}/list-instances.jq -r
