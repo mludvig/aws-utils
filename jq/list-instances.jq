@@ -4,7 +4,7 @@ def pad(width):
 
 # Display running instances' Name and PrivateIpAddress
 [
-	.Reservations[].Instances[0]
+	.Reservations[].Instances[]
 	| select(.State.Name == "running" and .Tags != null)
 	| {
 		"PrivateIpAddress": .PrivateIpAddress?,
