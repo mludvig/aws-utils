@@ -11,5 +11,6 @@ set -e
 
 export SCRIPTS_DIR=$(dirname $0)
 test -z "${SCRIPTS_DIR}" && SCRIPTS_DIR=$(dirname $(which $0))
+export JQ_DIR=${SCRIPTS_DIR}/../jq
 
-aws ec2 describe-instances | jq -f ${SCRIPTS_DIR}/list-instances.jq -r
+aws ec2 describe-instances | jq -f ${JQ_DIR}/list-instances.jq -r
