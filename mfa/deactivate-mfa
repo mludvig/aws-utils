@@ -1,0 +1,27 @@
+#!/bin/bash
+
+set -e
+
+MFA_LIST=$(aws $* iam list-mfa-devices)
+if [ $(jq '.MFADevices | length' <<< ${MFA_LIST}) = "0" ]; then
+	echo -e "MFA not enabled"
+	exit 0
+fi
+
+eval $(jq -r '.MFADevices[] | @text "MFA_USER_NAME=\(.UserName)\nMFA_SERIAL_NUMBER=\(.SerialNumber)"' <<< ${MFA_LIST})
+
+echo -en "\e[31;1mDisable MFA for \e[33;1m${MFA_USER_NAME}\e[31;1m (y/[n]) \e[0m"
+read ANS
+
+if [ "${ANS:0:1}" == 'y' ]; then
+	aws $* iam deactivate-mfa-device --user-name ${MFA_USER_NAME} --serial-number ${MFA_SERIAL_NUMBER}
+	aws $* iam delete-virtual-mfa-device --serial-number ${MFA_SERIAL_NUMBER}
+	MFA_LIST2=$(aws $* iam list-mfa-devices)
+	if [ $(jq '.MFADevices | length' <<< ${MFA_LIST2}) = "0" ]; then
+		echo -e "\e[32;1mMFA Disabled\e[0m"
+		exit 0
+	else
+		echo -e "\e[31;1mMFA Still Enabled - please investigate\e[0m"
+		exit 1
+	fi
+fi
