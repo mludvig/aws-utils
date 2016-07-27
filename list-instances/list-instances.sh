@@ -6,7 +6,9 @@
 
 export AWS_UTILS=/opt/aws-utils
 
-export AWS_DEFAULT_REGION=$(curl -s http://169.254.169.254/latest/meta-data/local-hostname | cut -d. -f2)
+_OUR_REGION=$(curl -s http://169.254.169.254/latest/meta-data/local-hostname | cut -d. -f2)
+export AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:=${_OUR_REGION}}
+unset _OUR_REGION
 
 echo
 echo -e '\e[36m=== Running EC2 instances:\e[32m'

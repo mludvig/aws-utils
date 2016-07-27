@@ -15,7 +15,7 @@ def pad(width):
 | group_by(.Name)
 | .[]
 | {
-	"FmtName": .[0].Name | pad(20),
+	"FmtName": .[0].Name | pad(30),
 	"FmtIpAddr": [ .[].PrivateIpAddress ] | join("  ")
 }
 | @text "\(.FmtName) \(.FmtIpAddr)"
