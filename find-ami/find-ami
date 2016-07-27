@@ -42,6 +42,7 @@ filters.
 
 Visit https://aws.nz/aws-utils/find-ami for more info and examples.
 __EOF__
+	exit 1
 }
 
 function fatal() {
