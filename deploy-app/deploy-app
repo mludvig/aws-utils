@@ -1,0 +1,108 @@
+#!/bin/bash -x
+
+set -e
+
+export SCRIPTS_DIR=$(dirname $0)
+test -z "${SCRIPTS_DIR}" && SCRIPTS_DIR=$(dirname $(which $0))
+
+function show_help() {
+	cat << __EOF__
+Usage: $(basename $0) -n APP-NAME -g DEPLOYMENT-GROUP -s SOURCE [OPTIONS]
+
+CodeDeploy SOURCE as APP-NAME to DEPLOYMENT-GROUP.
+
+   -d DEPLOYMENT-GROUP
+                Deployment Group for app deployment.
+
+   -a APP-NAME  CodeDeploy Application Name.
+
+   -s SOURCE    Path to the directory with appspec.yml
+
+   -l S3-LOCATION
+                s3://<BucketName>/<Path>/<File-0.1.2.zip>
+
+   -n           Default (new) deployment only. Do nothing if an existing
+                deployment already exists.
+
+   -p PROFILE   AWS-CLI Profile name as defined in ~/.aws/config.
+                Optional, will use default or instance meta-data if
+                not specified.
+
+   -g REGION    AWS Region to query. Optional if PROFILE has region set.
+
+Visit https://aws.nz/aws-utils/deploy-app for more info and usage examples.
+
+__EOF__
+	exit 1
+}
+
+function fatal() {
+	echo $1 >&2
+	exit 1
+}
+
+AWS=$(which aws 2>/dev/null) || true
+test -z "${AWS}" && fatal "The 'aws' utility not found. Please install it or add its location to \$PATH"
+
+JQ=$(which jq 2>/dev/null) || true
+test -z "${JQ}" && fatal "The 'jq' utility not found. Please install it or add its location to \$PATH"
+
+NEW_ONLY=0
+DEPL_CONFIG="CodeDeployDefault.OneAtATime"
+while getopts "hna:g:p:d:s:l:" OPT; do
+	case "${OPT}" in
+	n)
+		NEW_ONLY=1
+		DEPL_CONFIG="CodeDeployDefault.AllAtOnce"	# Install whole fleet asap
+		;;
+	g)
+		AWS="${AWS} --region=${OPTARG}"
+		;;
+	p)
+		AWS="${AWS} --profile=${OPTARG}"
+		;;
+	a)
+		APP_NAME="${OPTARG}"
+		;;
+	s)
+		APP_SOURCE="${OPTARG}"
+		;;
+	d)
+		DEPL_GROUP="${OPTARG}"
+		;;
+	l)
+		S3_LOCATION="${OPTARG}"
+		;;
+	h)
+		show_help
+		;;
+	esac
+done
+
+test -z "${APP_NAME}" && fail "Application name is required (-a)"
+test -z "${DEPL_GROUP}" && fail "Deployment Group name is required (-d)"
+test -z "${APP_SOURCE}" && fail "Path to directory with appspec.yml is required (-s)"
+test -z "${S3_LOCATION}" && fail "S3 Location for upload is required (-l)"
+
+if [ "${NEW_ONLY}" == "1" ]; then
+	# Figure out if any deployment already exists
+	OUTPUT=$(${AWS} deploy list-deployments --deployment-group-name "${DEPL_GROUP}" --application-name "${APP_NAME}")
+	test "$(jq '.deployments | length' <<< ${OUTPUT})" == "0" || exit 0
+fi
+
+# Push a new revision
+OUTPUT=$(${AWS} deploy push --application-name "${APP_NAME}" --s3-location "${S3_LOCATION}" --source "${APP_SOURCE}" | grep "^aws deploy create-deployment")
+
+# OUTPUT contains something like:
+# aws deploy create-deployment \
+#	--application-name bein-dev-1-frontend \
+#	--s3-location bucket=dev-s3-servicebucket,key=deploy/apps/frontend-app-0.0.1.zip,bundleType=zip,eTag="cdef...." \
+#	--deployment-group-name <deployment-group-name> \		# Replace
+#	--deployment-config-name <deployment-config-name> \		# Replace
+#	--description <description>					# Remove
+OUTPUT=$(sed \
+	-e "s,^aws,${AWS},g" \
+	-e "s/<deployment-group-name>/${DEPL_GROUP}/g" \
+	-e "s/<deployment-config-name>/${DEPL_CONFIG}/g" \
+	-e "s/--description <description>//g" <<< ${OUTPUT})
+${OUTPUT}
