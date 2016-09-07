@@ -108,6 +108,10 @@ if [ -n "${PRESET}" ]; then
 		OWNER=${OWNER:=amazon}
 		NAME=${NAME:=amzn-ami-[^-]*-[^-]*-gp2}
 		;;
+	redhat-el7)
+		OWNER=${OWNER:=309956199498}
+		NAME=${NAME:=RHEL-7.*_HVM.*x86_64.*Hourly2-GP2}
+		;;
 	bitnami-wordpress)
 		OWNER=${OWNER:=679593333241}
 		NAME=${NAME:=bitnami-wordpress-[0-9.-]+-linux-ubuntu-.*-ebs}
