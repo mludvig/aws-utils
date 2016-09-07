@@ -24,6 +24,10 @@ CodeDeploy SOURCE as APP-NAME to DEPLOYMENT-GROUP.
    -n           Default (new) deployment only. Do nothing if an existing
                 deployment already exists.
 
+   -w / -W      Wait (-w) or Don't wait (-W) for deployment success.
+                Default is Wait when running with TTY and Don't Wait
+                if running without TTY, e.g. from Script.
+
    -p PROFILE   AWS-CLI Profile name as defined in ~/.aws/config.
                 Optional, will use default or instance meta-data if
                 not specified.
@@ -49,7 +53,7 @@ test -z "${JQ}" && fatal "The 'jq' utility not found. Please install it or add i
 
 NEW_ONLY=0
 DEPL_CONFIG="CodeDeployDefault.OneAtATime"
-while getopts "hna:g:p:d:s:l:" OPT; do
+while getopts "hna:g:p:d:s:l:wW" OPT; do
 	case "${OPT}" in
 	n)
 		NEW_ONLY=1
@@ -73,6 +77,12 @@ while getopts "hna:g:p:d:s:l:" OPT; do
 	l)
 		S3_LOCATION="${OPTARG}"
 		;;
+        w)
+                WAIT=1
+                ;;
+        W)
+                WAIT=0
+                ;;
 	h)
 		show_help
 		;;
@@ -84,10 +94,17 @@ test -z "${DEPL_GROUP}" && fail "Deployment Group name is required (-d)"
 test -z "${APP_SOURCE}" && fail "Path to directory with appspec.yml is required (-s)"
 test -z "${S3_LOCATION}" && fail "S3 Location for upload is required (-l)"
 
+tty -s
+TTY=$?
+test -z "${WAIT}" && WAIT=$((1 - ${TTY}))
+
 if [ "${NEW_ONLY}" == "1" ]; then
 	# Figure out if any deployment already exists
 	OUTPUT=$(${AWS} deploy list-deployments --deployment-group-name "${DEPL_GROUP}" --application-name "${APP_NAME}")
-	test "$(jq '.deployments | length' <<< ${OUTPUT})" == "0" || exit 0
+	if [ "$(jq '.deployments | length' <<< ${OUTPUT})" != "0" ]; then
+		echo "* Deployment already exists, exitting."
+		exit 0
+	fi
 fi
 
 # Push a new revision
@@ -110,6 +127,9 @@ CMD=$(sed \
 OUTPUT=$(${CMD})
 DEPL_ID=$(jq -r ".deploymentId" <<< ${OUTPUT})
 echo "* Deployment ID: ${DEPL_ID}"
+
+# If we're not waiting for deployment exit now
+test "${WAIT}" == "0" && exit 0
 
 echo "* Waiting for rollout, please wait"
 echo "* A = Succeeded, B = In Progress, C = Pending, D = Skipped, E = Failed"
