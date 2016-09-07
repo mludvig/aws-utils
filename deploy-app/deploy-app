@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash
 
 set -e
 
@@ -91,6 +91,7 @@ if [ "${NEW_ONLY}" == "1" ]; then
 fi
 
 # Push a new revision
+echo "* Pushing new revision to ${S3_LOCATION}"
 OUTPUT=$(${AWS} deploy push --application-name "${APP_NAME}" --s3-location "${S3_LOCATION}" --source "${APP_SOURCE}" | grep "^aws deploy create-deployment")
 
 # OUTPUT contains something like:
@@ -100,9 +101,29 @@ OUTPUT=$(${AWS} deploy push --application-name "${APP_NAME}" --s3-location "${S3
 #	--deployment-group-name <deployment-group-name> \		# Replace
 #	--deployment-config-name <deployment-config-name> \		# Replace
 #	--description <description>					# Remove
-OUTPUT=$(sed \
+echo "* Creating deployment for ${APP_NAME}"
+CMD=$(sed \
 	-e "s,^aws,${AWS},g" \
 	-e "s/<deployment-group-name>/${DEPL_GROUP}/g" \
 	-e "s/<deployment-config-name>/${DEPL_CONFIG}/g" \
 	-e "s/--description <description>//g" <<< ${OUTPUT})
-${OUTPUT}
+OUTPUT=$(${CMD})
+DEPL_ID=$(jq -r ".deploymentId" <<< ${OUTPUT})
+echo "* Deployment ID: ${DEPL_ID}"
+
+echo "* Waiting for rollout, please wait"
+echo "* A = Succeeded, B = In Progress, C = Pending, D = Skipped, E = Failed"
+echo "+----+----+----+----+----+------------+"
+echo "|  A |  B |  C |  D |  E |     Status |"
+echo "+----+----+----+----+----+------------+"
+while (sleep 5) do
+	OUTPUT=$(${AWS} deploy get-deployment --deployment-id "${DEPL_ID}")
+	eval $(jq -r '.deploymentInfo.deploymentOverview|@text "A=\(.Succeeded)\nB=\(.InProgress)\nC=\(.Pending)\nD=\(.Skipped)\nE=\(.Failed)"' <<< ${OUTPUT})
+	STATUS=$(jq -r ".deploymentInfo.status" <<< ${OUTPUT})
+	printf "| %2d | %2d | %2d | %2d | %2d | %10s |\n" ${A} ${B} ${C} ${D} ${E} ${STATUS}
+	if [ "${STATUS}" == "Succeeded" -o "${STATUS}" == "Failed" -o "${STATUS}" == "Stopped" ]; then
+		break
+	fi
+done
+echo "+----+----+----+----+----+------------+"
+
