@@ -1,0 +1,2 @@
+NICKNAME|OWNER|PATTERN
+amazon-linux|amazon|amzn-ami-[^-]*-[^-]*-gp2
