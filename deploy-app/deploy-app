@@ -94,9 +94,11 @@ test -z "${DEPL_GROUP}" && fail "Deployment Group name is required (-d)"
 test -z "${APP_SOURCE}" && fail "Path to directory with appspec.yml is required (-s)"
 test -z "${S3_LOCATION}" && fail "S3 Location for upload is required (-l)"
 
-tty -s
-TTY=$?
-test -z "${WAIT}" && WAIT=$((1 - ${TTY}))
+if [ -z "${WAIT}" ]; then
+	# Work around 'set -e' ;)
+	WAIT=1
+	tty -s || WAIT=0
+fi
 
 if [ "${NEW_ONLY}" == "1" ]; then
 	# Figure out if any deployment already exists
