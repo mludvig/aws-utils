@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# For blue/green deployment with e.g. mystack-prod-green and mystack-prod-blue
+# stacks the common practice is to have a CNAME mystack-prod pointing
+# to either the blue or the green stack.
+#
+# This script resolves the DNS and displays which stack is active.
+#
+# === Current DNS aliases in demo.aws.nz:
+#       mystack-prod is mystack-prod-green
+#    mystack-prelive is mystack-prelive-blue2
+# === Run current-dns to display the list again.
+#
+# Best called from the login .profile script on a bastion/jump host
+
+ENVS="mystack-prod mystack-prelive"
+DOMAIN="demo.aws.nz"
+
+echo -e "\e[36m=== Current DNS aliases in \e[34m${DOMAIN}\e[36m:\e[0m"
+for E in ${ENVS}; do
+        OUTPUT=$(host -t CNAME ${E}.${DOMAIN} 2>&1)
+        test "$?" == "0" || continue
+        printf "\e[31m%20s\e[34m is \e[32m%s\e[0m\n" $(sed -e "s/\.${DOMAIN}\.*//g" -e 's/is an alias for//' <<< ${OUTPUT})
+done
+echo -e '\e[36m=== Run \e[34mcurrent-dns\e[36m to display the list again.\e[0m'
