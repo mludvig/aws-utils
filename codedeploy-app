@@ -89,10 +89,10 @@ while getopts "hna:g:p:d:s:l:wW" OPT; do
 	esac
 done
 
-test -z "${APP_NAME}" && fail "Application name is required (-a)"
-test -z "${DEPL_GROUP}" && fail "Deployment Group name is required (-d)"
-test -z "${APP_SOURCE}" && fail "Path to directory with appspec.yml is required (-s)"
-test -z "${S3_LOCATION}" && fail "S3 Location for upload is required (-l)"
+test -z "${APP_NAME}" && fatal "Application name is required (-a)"
+test -z "${DEPL_GROUP}" && fatal "Deployment Group name is required (-d)"
+test -z "${APP_SOURCE}" && fatal "Path to directory with appspec.yml is required (-s)"
+test -z "${S3_LOCATION}" && fatal "S3 Location for upload is required (-l)"
 
 if [ -z "${WAIT}" ]; then
 	# Work around 'set -e' ;)
