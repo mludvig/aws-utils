@@ -3,8 +3,8 @@
 
 # Trigger this function from CloudWatch Scheduler (cron-like)
 # Pass the Instance ID in 'instance_id' environment variable.
-# The IAM Role must allow ec2:DescribeInstance, ec2:CreateImage
-# and ec2:CreateTags on the instance ID.
+# The IAM Role must allow ec2:DescribeInstance, ec2:CreateImage,
+# ec2:RegisterImage and ec2:CreateTags on the instance ID.
 
 from __future__ import print_function
 import os
@@ -37,7 +37,8 @@ def lambda_handler(event, context):
     else:
         description = instance_id
 
-    name = instance_id + '_' + datetime.strftime(datetime.now(), '%s')
+    snapshot_timestamp = datetime.strftime(datetime.now(), '%s')
+    name = instance_id + '_' + snapshot_timestamp
     description = description + ' ' + datetime.strftime(datetime.now(), '%Y-%m-%d %H-%M-%S')
     print('Creating image: %s' % name)
     response = ec2.create_image(
@@ -48,9 +49,12 @@ def lambda_handler(event, context):
     )
     image_id = response['ImageId']
     print('Created Image: %s' % image_id)
+    image_tags = [
+        {'Key': 'SnapshotTimestamp', 'Value': snapshot_timestamp },
+        {'Key': 'InstanceId', 'Value': instance_id }
+    ]
     if 'Name' in tags:
-        ec2.create_tags(
-            Resources=[image_id],
-            Tags=[ {'Key': 'Name', 'Value': tags['Name'] } ]
-        )
+        image_tags.append({ 'Key': 'Name', 'Value': tags['Name'] })
+    ec2.create_tags(Resources = [image_id], Tags = image_tags)
+
     return image_id
