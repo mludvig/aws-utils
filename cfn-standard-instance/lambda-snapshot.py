@@ -3,13 +3,12 @@
 
 # Trigger this function from CloudWatch Scheduler (cron-like)
 # Pass the Instance ID in 'instance_id' environment variable.
-# The IAM Role must allow ec2:DescribeInstance, ec2:CreateImage,
-# ec2:RegisterImage and ec2:CreateTags on the instance ID.
 
 from __future__ import print_function
 import os
 import boto3
-from datetime import datetime
+from datetime import datetime, timedelta
+import time
 
 ec2 = boto3.client('ec2')
 
@@ -57,13 +56,40 @@ def create_image(instance_id):
 
     return (image_id, snapshot_timestamp)
 
+def deregister_old_images(instance_id, retain_days):
+    oldest_time = datetime.now() - timedelta(days = retain_days)
+    oldest_timestamp = int(time.mktime(oldest_time.timetuple()))
+    print('Purging images older than: %s' % oldest_time.strftime('%Y-%m-%d %H-%M-%S'))
+
+    images = ec2.describe_images(Owners=['self'], Filters=[
+        { 'Name': 'tag:InstanceId', 'Values': [ instance_id ] },
+        { 'Name': 'tag-key', 'Values': [ 'SnapshotTimestamp' ] }
+    ])
+    for image in images['Images']:
+        try:
+            tags = {item['Key']:item['Value'] for item in image['Tags']}
+            snapshot_timestamp = int(tags['SnapshotTimestamp'])
+        except:
+            continue
+        if snapshot_timestamp < oldest_timestamp:
+            print('%s: Deregistering image' % image['ImageId'])
+            ec2.deregister_image(ImageId = image['ImageId'])
+            try:
+                print('%s: Image info: name=%s created=%s' % (image['ImageId'], image['Name'], image['CreationDate']))
+            except:
+                pass
+        else:
+            print('%s: Retaining image: name=%s created=%s' % (image['ImageId'], image['Name'], image['CreationDate']))
+
 def lambda_handler(event, context):
     try:
         instance_id = os.environ['instance_id']
+        retain_days = int(os.environ['retain_days'])
     except:
-        print('Environment variable [instance_id] must be set')
+        print('Environment variables [instance_id] and [retain_days] must be set')
         raise
 
     image_id, snapshot_timestamp = create_image(instance_id)
+    deregister_old_images(instance_id, retain_days)
 
     return image_id
