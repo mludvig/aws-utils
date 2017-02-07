@@ -1,0 +1,414 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Standard EC2 Instance stack",
+  "Metadata": {
+    "Author": "Michael Ludvig - https://aws.nz"
+  },
+  "Parameters": {
+    "HostedZone": {
+      "Type": "String",
+      "Description": "Route53 zone for the private IP DNS record"
+    },
+    "SubnetId": {
+      "Type": "AWS::EC2::Subnet::Id",
+      "Description": "The subnet where this instance should be deployed"
+    },
+    "DefaultSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup::Id",
+      "Description": "Name of an existing SG providing SSH access"
+    },
+    "KeyName": {
+      "Type": "AWS::EC2::KeyPair::KeyName",
+      "Description": "Name of an existing EC2 KeyPair to enable SSH access to the EC2 instances"
+    },
+    "ImageId": {
+      "Type": "AWS::EC2::Image::Id",
+      "Description": "AMI ID to use"
+    },
+    "InstanceType": {
+      "AllowedValues": [
+        "t2.micro",
+        "t2.small",
+        "t2.large",
+        "m4.medium"
+      ],
+      "ConstraintDescription": "Must be an allowed EC2 instance type. Change the template to add more options.",
+      "Default": "t2.micro",
+      "Description": "EC2 instance type",
+      "Type": "String"
+    },
+    "AssignElasticIP": {
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Default": "false",
+      "Description": "Assign Elastic IP",
+      "Type": "String"
+    },
+    "SnapshotDayOfWeek": {
+      "Type": "String",
+      "Description": "Day of week when Snapshot will be taken. Format: '*' or 'MON-SUN' or 'WED,SAT'",
+      "Default": "MON-SUN"
+    },
+    "SnapshotHour": {
+      "Type": "Number",
+      "MinValue": -1,
+      "MaxValue": 23,
+      "Description": "GMT Timezone hour when Snapshot will be taken. Set to -1 to disable automatic snapshots."
+    },
+    "SnapshotMinute": {
+      "Type": "Number",
+      "MinValue": 0,
+      "MaxValue": 59,
+      "Description": "Minute after Snapshot hour when Snapshot will be taken. Ignored if SnapshotHour == -1."
+    }
+  },
+  "Conditions": {
+    "AssignElasticIP": {
+      "Fn::Equals": [ { "Ref": "AssignElasticIP" }, "true" ]
+    },
+    "AutoSnapshot": {
+      "Fn::Not": [ { "Fn::Equals": [ { "Ref": "SnapshotHour" }, "-1" ] } ]
+    }
+  },
+  "Resources": {
+    "InstanceRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "ec2.amazonaws.com"
+                ]
+              },
+              "Action": [
+                "sts:AssumeRole"
+              ]
+            }
+          ]
+        },
+        "Path": "/",
+        "Policies": [
+          {
+            "PolicyName": "S3_Access",
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:ListBuckets"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "InstanceProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Path": "/",
+        "Roles": [
+          {
+            "Ref": "InstanceRole"
+          }
+        ]
+      }
+    },
+    "Instance": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "ImageId": { "Ref": "ImageId" },
+        "InstanceType": { "Ref": "InstanceType" },
+        "KeyName": { "Ref": "KeyName" },
+        "SubnetId": { "Ref": "SubnetId" },
+        "SecurityGroupIds": [ { "Ref": "DefaultSecurityGroup" } ],
+        "IamInstanceProfile": { "Ref": "InstanceProfile" },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": { "Ref": "AWS::StackName" }
+          }
+        ],
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": [
+              "",
+              [
+                "#cloud-config\n",
+                "timezone: Pacific/Auckland\n",
+                "hostname: ", { "Ref": "AWS::StackName" }, ".", { "Ref": "HostedZone" }, "\n",
+                "preserve_hostname: false\n",
+                "runcmd:\n",
+                " - yum -y install epel-release\n",
+                " - yum-config-manager --enable epel\n",
+                " - /opt/aws/bin/cfn-init -v -r Instance --region ", { "Ref": "AWS::Region" }, " -s ", { "Ref": "AWS::StackId" }, "\n"
+              ]
+            ]
+          }
+        }
+      },
+      "Metadata": {
+        "AWS::CloudFormation::Init": {
+          "config": {
+            "packages": {
+              "yum": {
+                "patch": [],
+                "git": [],
+                "bash-completion": []
+              }
+            },
+            "files": {
+              "/etc/profile.d/local.sh": {
+                "source": "https://gist.githubusercontent.com/mludvig/3840d8030bac5e7db95921baff87989a/raw/profile-local.sh",
+                "mode": "0644",
+                "owner": "root",
+                "group": "root"
+              },
+              "/etc/pythonstart": {
+                "source": "https://gist.githubusercontent.com/mludvig/a0a72e4e363e67101d673f11da2160d7/raw/pythonstart.py",
+                "mode": "0644",
+                "owner": "root",
+                "group": "root"
+              }
+            },
+            "commands": {
+              "20-Git-Prompt": {
+                "command": "cp -vf /usr/share/doc/git-*/contrib/completion/git-prompt.sh /etc/bash_completion.d/"
+              },
+              "99-Upgrade-Reboot": {
+                "command": "yum -y upgrade && reboot"
+              }
+            }
+          }
+        }
+      }
+    },
+    "ElasticIP": {
+      "Type" : "AWS::EC2::EIP",
+      "Condition": "AssignElasticIP",
+      "Properties" : {
+        "InstanceId" : { "Ref" : "Instance" }
+      }
+    },
+    "DNSRecordPrivate": {
+      "Type": "AWS::Route53::RecordSet",
+      "Properties": {
+        "HostedZoneName": {
+          "Fn::Join": [ "", [ { "Ref": "HostedZone" }, "." ] ]
+        },
+        "Name": {
+          "Fn::Join": [ "", [
+              { "Ref": "AWS::StackName" }, ".", { "Ref": "HostedZone" }, "."
+          ] ]
+        },
+        "Type": "A",
+        "TTL": "900",
+        "ResourceRecords": [
+          { "Fn::GetAtt": [ "Instance", "PrivateIp" ] }
+        ]
+      }
+    },
+    "DNSRecordPublic": {
+      "Type": "AWS::Route53::RecordSet",
+      "Condition": "AssignElasticIP",
+      "Properties": {
+        "HostedZoneName": {
+          "Fn::Join": [ "", [ { "Ref": "HostedZone" }, "." ] ]
+        },
+        "Name": {
+          "Fn::Join": [ "", [
+              { "Ref": "AWS::StackName" }, "-pub.", { "Ref": "HostedZone" }, "."
+          ] ]
+        },
+        "Type": "A",
+        "TTL": "900",
+        "ResourceRecords": [
+          { "Ref": "ElasticIP" }
+        ]
+      }
+    },
+
+    "SnapshotScheduler": {
+      "Type" : "AWS::Events::Rule",
+      "Condition": "AutoSnapshot",
+      "Properties" : {
+        "Description": "Snapshot scheduler",
+        "ScheduleExpression": { "Fn::Join": [ "", [ "cron(", { "Ref": "SnapshotMinute" }, " ", { "Ref": "SnapshotHour" }, " ? * ", { "Ref": "SnapshotDayOfWeek" }, " *)" ] ] },
+        "Targets": [{
+          "Arn": { "Fn::GetAtt": [ "SnapshotLambda", "Arn" ] },
+          "Id": "SnapshotLambda_Target"
+        }]
+      }
+    },
+    "SnapshotSchedulerPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Condition": "AutoSnapshot",
+      "Properties": {
+        "FunctionName": { "Ref": "SnapshotLambda" },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "events.amazonaws.com",
+        "SourceArn": { "Fn::GetAtt": [ "SnapshotScheduler", "Arn" ] }
+      }
+    },
+    "SnapshotRole": {
+      "Type": "AWS::IAM::Role",
+      "Condition": "AutoSnapshot",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Path": "/",
+        "Policies": [
+          {
+            "PolicyName": "CloudWatchLogsPolicy",
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogGroup",
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": "arn:aws:logs:*:*:*"
+                }
+              ]
+            }
+          },
+          {
+            "PolicyName": "SnapshotPolicy",
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:DescribeInstances",
+										"ec2:CreateImage",
+                    "ec2:CreateTags",
+										"ec2:RegisterImage"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "SnapshotLambda": {
+      "Type": "AWS::Lambda::Function",
+      "Condition": "AutoSnapshot",
+      "Properties": {
+        "Environment": {
+          "Variables": { "instance_id": { "Ref": "Instance" } }
+        },
+        "Handler": "index.lambda_handler",
+        "Role": { "Fn::GetAtt": [ "SnapshotRole", "Arn" ] },
+        "MemorySize": 128,
+        "Timeout": 10,
+        "Code": {
+          "ZipFile":  { "Fn::Join": [ "\n", [
+            "# AWS Lambda function for creating an image from a given instance.",
+            "# By Michael Ludvig - https://aws.nz",
+            "",
+            "# Trigger this function from CloudWatch Scheduler (cron-like)",
+            "# Pass the Instance ID in 'instance_id' environment variable.",
+            "# The IAM Role must allow ec2:DescribeInstance, ec2:CreateImage,",
+            "# ec2:RegisterImage and ec2:CreateTags on the instance ID.",
+            "",
+            "from __future__ import print_function",
+            "import os",
+            "import boto3",
+            "from datetime import datetime",
+            "",
+            "ec2 = boto3.client('ec2')",
+            "",
+            "def lambda_handler(event, context):",
+            "    try:",
+            "        instance_id = os.environ['instance_id']",
+            "    except:",
+            "        print('Environment variable [instance_id] must be set')",
+            "        raise",
+            "",
+            "    print('Snapshotting instance: %s' % instance_id)",
+            "    instance = ec2.describe_instances(InstanceIds=[instance_id])",
+            "    description = ''",
+            "    tags = {}",
+            "",
+            "    try:",
+            "        tags = {item['Key']:item['Value'] for item in instance['Reservations'][0]['Instances'][0]['Tags']}",
+            "    except:",
+            "        pass",
+            "",
+            "    if 'Name' in tags:",
+            "        description = tags['Name']",
+            "    elif 'aws:cloudformation:stack-name' in tags:",
+            "        description = tags['aws:cloudformation:stack-name']",
+            "    else:",
+            "        description = instance_id",
+            "",
+            "    name = instance_id + '_' + datetime.strftime(datetime.now(), '%s')",
+            "    description = description + ' ' + datetime.strftime(datetime.now(), '%Y-%m-%d %H-%M-%S')",
+            "    print('Creating image: %s' % name)",
+            "    response = ec2.create_image(",
+            "        InstanceId = instance_id,",
+            "        Name = name,",
+            "        Description = description,",
+            "        NoReboot = False,",
+            "    )",
+            "    image_id = response['ImageId']",
+            "    print('Created Image: %s' % image_id)",
+            "    if 'Name' in tags:",
+            "        ec2.create_tags(",
+            "            Resources=[image_id],",
+            "            Tags=[ {'Key': 'Name', 'Value': tags['Name'] } ]",
+            "        )",
+            "    return image_id"
+            ]]}
+        },
+        "Runtime": "python2.7"
+      }
+    }
+  },
+  "Outputs": {
+    "InstanceID": {
+      "Description": "Instance ID",
+      "Value": { "Ref": "Instance" }
+    },
+    "PrivateIP": {
+      "Description": "Private IP",
+      "Value": { "Fn::GetAtt": [ "Instance", "PrivateIp" ] }
+    },
+    "ElasticIP": {
+      "Description": "Elastic IP",
+      "Condition": "AssignElasticIP",
+      "Value": { "Ref": "ElasticIP" }
+    },
+    "DNSNamePrivate": {
+      "Description": "DNS Name",
+      "Value": { "Ref": "DNSRecordPrivate" }
+    },
+    "DNSNamePublic": {
+      "Description": "DNS Name",
+      "Condition": "AssignElasticIP",
+      "Value": { "Ref": "DNSRecordPublic" }
+    }
+  }
+}
