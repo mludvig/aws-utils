@@ -18,7 +18,7 @@ if len(sys.argv) > 1:
 else:
     inp = sys.stdin
 
-changes = []
+changes = {}
 zone_name = ""
 
 while True:
@@ -34,25 +34,34 @@ while True:
         sys.stderr.write("Unknown class, only supporting IN: %s" % line)
         continue
     if rr.group('type') == "SOA":
+        # Ignore SOA records
         zone_name = rr.group('name')
         continue
     if rr.group('type') == "NS" and rr.group('name') == zone_name:
         # Ignore zone NS records
         continue
-    changes.append({
-        "Action" : "CREATE",
-        "ResourceRecordSet" : {
-            "Name" : rr.group('name'),
-            "Type" : rr.group('type'),
-            "TTL"  : int(rr.group('ttl')),
-            "ResourceRecords" : [{
-                "Value" : rr.group('data')
-            }]
+
+    # Merge records of the same type, e.g. all A records for the same name
+    change_id = "%(name)s/%(type)s" % rr.groupdict()
+    if change_id in changes:
+        changes[change_id]["ResourceRecordSet"]["ResourceRecords"].append({
+            "Value": rr.group('data')
+        })
+    else:
+        changes[change_id] = {
+            "Action" : "CREATE",
+            "ResourceRecordSet" : {
+                "Name" : rr.group('name'),
+                "Type" : rr.group('type'),
+                "TTL"  : int(rr.group('ttl')),
+                "ResourceRecords" : [{
+                    "Value" : rr.group('data')
+                }]
+            }
         }
-    })
 
 if changes:
     change_batch = {
-        "Changes": changes
+        "Changes": list(changes.values())
     }
     print(json.dumps(change_batch, indent=2))
