@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+
+# Author: Michael Ludvig - https://aws.nz/aws-utils/axfr2route53
+# License: BSD
+
+# Convert DNS zone from Bind's "dig axfr" format to AWS Route53 JSON input
+# Usage:
+#  1) dig axfr example.com. @ns.example.com. | axfr2route53 > example-com.json
+#  2) aws route53 change-resource-record-sets --hosted-zone-id ZABCDEF123456 --change-batch file://example-com.json
+#  3) Update list of nameservers to AWS ones through example.com's registrar
+
+import re
+import sys
+import json
+
+if len(sys.argv) > 1:
+    inp = open(sys.argv[1], 'r')
+else:
+    inp = sys.stdin
+
+changes = {}
+zone_name = ""
+
+while True:
+    line = inp.readline()
+    if not line:
+        break
+    line = line.strip()
+    rr = re.match('^(?P<name>\S+)\s+(?P<ttl>\d+)\s+(?P<class>\w+)\s+(?P<type>\w+)\s+(?P<data>.*)$', line)
+    if not rr:
+        continue
+
+    if rr.group('class') != "IN":
+        sys.stderr.write("Unknown class, only supporting IN: %s" % line)
+        continue
+    if rr.group('type') == "SOA":
+        # Ignore SOA records
+        zone_name = rr.group('name')
+        continue
+    if rr.group('type') == "NS" and rr.group('name') == zone_name:
+        # Ignore zone NS records
+        continue
+
+    # Merge records of the same type, e.g. all A records for the same name
+    change_id = "%(name)s/%(type)s" % rr.groupdict()
+    if change_id in changes:
+        changes[change_id]["ResourceRecordSet"]["ResourceRecords"].append({
+            "Value": rr.group('data')
+        })
+    else:
+        changes[change_id] = {
+            "Action" : "CREATE",
+            "ResourceRecordSet" : {
+                "Name" : rr.group('name'),
+                "Type" : rr.group('type'),
+                "TTL"  : int(rr.group('ttl')),
+                "ResourceRecords" : [{
+                    "Value" : rr.group('data')
+                }]
+            }
+        }
+
+if changes:
+    change_batch = {
+        "Changes": list(changes.values())
+    }
+    print(json.dumps(change_batch, indent=2))
