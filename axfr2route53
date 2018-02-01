@@ -26,32 +26,27 @@ while True:
     if not line:
         break
     line = line.strip()
-    m = re.match('^(\S+)\s+(\d+)\s+(\w+)\s+(\w+)\s+(.*)$', line)
-    if not m:
+    rr = re.match('^(?P<name>\S+)\s+(?P<ttl>\d+)\s+(?P<class>\w+)\s+(?P<type>\w+)\s+(?P<data>.*)$', line)
+    if not rr:
         continue
-    r = {}
-    r['name'] = m.group(1)
-    r['ttl'] = int(m.group(2))
-    r['class'] = m.group(3)
-    r['type'] = m.group(4)
-    r['data'] = m.group(5)
-    if r['class'] != "IN":
+
+    if rr.group('class') != "IN":
         sys.stderr.write("Unknown class, only supporting IN: %s" % line)
         continue
-    if r['type'] == "SOA":
-        zone_name = r['name']
+    if rr.group('type') == "SOA":
+        zone_name = rr.group('name')
         continue
-    if r['type'] == "NS" and r['name'] == zone_name:
+    if rr.group('type') == "NS" and rr.group('name') == zone_name:
         # Ignore zone NS records
         continue
     changes.append({
         "Action" : "CREATE",
         "ResourceRecordSet" : {
-            "Name" : r['name'],
-            "Type" : r['type'],
-            "TTL"  : r['ttl'],
+            "Name" : rr.group('name'),
+            "Type" : rr.group('type'),
+            "TTL"  : int(rr.group('ttl')),
             "ResourceRecords" : [{
-                "Value" : r['data']
+                "Value" : rr.group('data')
             }]
         }
     })
