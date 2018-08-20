@@ -5,11 +5,12 @@
 # E.g. incoming only from CloudFront
 #   or outgoing only to non-EC2 ranges in US-WEST-1 region
 
-# Author: Michal Ludvig <mludvig@logix.net.nz>
+# Author: Michael Ludvig <mludvig@logix.net.nz>
 
 import json
 import sys
 import argparse
+import ipaddress
 from httplib2 import Http
 
 def fatal(message):
@@ -44,6 +45,25 @@ FILTER Syntax
 
     The KEYWORD can be a Service (e.g. AMAZON, EC2, ...) or Region (us-west-1,
     ap-southeast-2, GLOBAL).
+
+    KEYWORD can also be an IP address in which case the matching subnet
+    will be selected.
+
+EXAMPLE
+
+    $ filter-ip-ranges ap-southeast-2 =AMAZON
+    52.119.210.0/23
+    54.239.0.112/28
+    52.144.224.64/26
+    54.240.204.0/22
+    ...
+
+    $ filter-ip-ranges -v 52.119.211.123
+    52.119.210.0/23 ap-southeast-2 AMAZON
+
+AUTHOR
+
+    Michael Ludvig -- https://aws.nz
     """
 
 args, extra = parser.parse_known_args()
@@ -83,7 +103,16 @@ for prefix in ipranges['prefixes']:
 
 prefixes = list(pfx_dict.values())
 
+ips = []
 for xarg in extra:
+    try:
+        # If xarg is an IP address we store it for later
+        # and move on to the next xarg
+        ips.append(ipaddress.ip_network(xarg))
+        continue
+    except ValueError:
+        pass
+
     _pfx = []
     if xarg.startswith('='):
         # Filter records that have ONLY this service/region
@@ -111,6 +140,16 @@ for xarg in extra:
 
 if not args.no_print_serial:
     print('# SERIAL=%s' % ipranges['syncToken'])
+
+# Now it's the time to process the IPs found in 'extra', if any
+if ips:
+    _pfx = []
+    for ip in ips:
+        for prefix in prefixes:
+            net = ipaddress.ip_network(prefix['net'])
+            if net.overlaps(ip):
+                _pfx.append(prefix)
+    prefixes = _pfx
 
 if args.verbose:
     print('# %d prefixes found / %d prefixes consolidated / %d prefixes matching' % (
