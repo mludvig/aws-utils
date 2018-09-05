@@ -10,6 +10,7 @@
 import json
 import sys
 import argparse
+import socket
 import ipaddress
 from httplib2 import Http
 
@@ -102,6 +103,7 @@ for prefix in ipranges['prefixes']:
         pfx_dict[ip_prefix]['svc'].append(prefix['service'])
 
 prefixes = list(pfx_dict.values())
+prefixes = sorted(prefixes, key=lambda x: socket.inet_aton(x['net'].split('/')[0]))
 
 ips = []
 for xarg in extra:
