@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
-# Parse and filter published Amazon IP Ranges.
-# Useful for creating securitygroups based on AWS Services
+# Parse, filter and lookup the published Amazon IP Ranges.
+# Useful for creating Security Groups and other firewall rules.
 # E.g. incoming only from CloudFront
 #   or outgoing only to non-EC2 ranges in US-WEST-1 region
 
@@ -25,6 +25,8 @@ Parse and Filter the published Amazon IP Ranges.
 parser.add_argument('--url', '-u', metavar="URL", default="https://ip-ranges.amazonaws.com/ip-ranges.json", help='URL for ip-ranges.json download. Default: %(default)s')
 parser.add_argument('--file', '-f', type=argparse.FileType('r'), help='Path to ip-ranges.json. Overrides --url')
 parser.add_argument('--min-serial', type=int, metavar="SERIAL", help='Only process the file id serial number (aka syncToken) is greater than SERIAL. No output if less or equal.')
+parser.add_argument('--ipv4', '-4', action="store_true", help='Lookup / display only IPv4 addresses. By default both IPv4 and IPv6 are considered.')
+parser.add_argument('--ipv6', '-6', action="store_true", help='Lookup / display only IPv6 addresses. By default both IPv4 and IPv6 are considered.')
 parser.add_argument('--quiet', action="store_true", help='Do not print any extra info, e.g. serial number, etc.')
 parser.add_argument('--verbose', '-v', action="store_true", help='Print the Region and Services along with each IP range.')
 parser.usage = parser.format_usage().rstrip()[7:]
@@ -48,6 +50,8 @@ FILTER Syntax
 
     KEYWORD can also be an IP address in which case the matching subnet
     will be selected.
+
+    Supports both IPv4 (default) and IPv6 addresses (with --ipv6 parameter).
 
 EXAMPLE
 
@@ -83,26 +87,44 @@ else:
     except Exception as e:
         fatal("Unable to load %s - %s" % (args.url, e))
 
-if len(ipranges['prefixes']) < 1:
+if len(ipranges['prefixes']) + len(ipranges['ipv6_prefixes']) < 1:
     fatal("No prefixes found")
 
 if args.min_serial and int(ipranges['syncToken']) <= args.min_serial:
     # Serial number is not greater than required by --min-serial=NNN
     sys.exit(0)
 
-pfx_dict = {}
-for prefix in ipranges['prefixes']:
-    ip_prefix = prefix['ip_prefix']
-    if ip_prefix not in pfx_dict:
-        pfx_dict[ip_prefix] = {}
-        pfx_dict[ip_prefix]['net'] = ip_prefix
-        pfx_dict[ip_prefix]['rgn'] = prefix['region']
-        pfx_dict[ip_prefix]['svc'] = [ prefix['service'] ]
+def list_prefixes(ipv4=True):
+    if ipv4:
+        address_family = socket.AF_INET
+        prefixes_label = 'prefixes'
+        ip_prefix_label = 'ip_prefix'
     else:
-        pfx_dict[ip_prefix]['svc'].append(prefix['service'])
+        address_family = socket.AF_INET6
+        prefixes_label = 'ipv6_prefixes'
+        ip_prefix_label = 'ipv6_prefix'
 
-prefixes = list(pfx_dict.values())
-prefixes = sorted(prefixes, key=lambda x: socket.inet_aton(x['net'].split('/')[0]))
+    pfx_dict = {}
+    for prefix in ipranges[prefixes_label]:
+        ip_prefix = prefix[ip_prefix_label]
+        if ip_prefix not in pfx_dict:
+            pfx_dict[ip_prefix] = {}
+            pfx_dict[ip_prefix]['net'] = ip_prefix
+            pfx_dict[ip_prefix]['rgn'] = prefix['region']
+            pfx_dict[ip_prefix]['svc'] = [ prefix['service'] ]
+        else:
+            pfx_dict[ip_prefix]['svc'].append(prefix['service'])
+
+    pfx_vals = list(pfx_dict.values())
+    pfx_vals = sorted(pfx_vals, key=lambda x: socket.inet_pton(address_family, x['net'].split('/')[0]))
+
+    return pfx_vals
+
+prefixes = []
+if not args.ipv6:
+    prefixes.extend(list_prefixes(ipv4=True))
+if not args.ipv4:
+    prefixes.extend(list_prefixes(ipv4=False))
 
 ips = []
 for xarg in extra:
@@ -153,8 +175,8 @@ if ips:
     prefixes = _pfx
 
 if args.verbose and not args.quiet:
-    print('# %d prefixes found / %d prefixes consolidated / %d prefixes matching' % (
-        len(ipranges['prefixes']), len(pfx_dict), len(prefixes)))
+    print('# %d prefixes found / %d prefixes matching' % (
+        len(ipranges['prefixes']), len(prefixes)))
 
 for prefix in prefixes:
     if args.verbose:
