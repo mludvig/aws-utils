@@ -24,8 +24,7 @@ Parse and Filter the published Amazon IP Ranges.
 """
 parser.add_argument('--url', '-u', metavar="URL", default="https://ip-ranges.amazonaws.com/ip-ranges.json", help='URL for ip-ranges.json download. Default: %(default)s')
 parser.add_argument('--file', '-f', type=argparse.FileType('r'), help='Path to ip-ranges.json. Overrides --url')
-parser.add_argument('--no-print-serial', action="store_true", help='Do not print ip-ranges.json serial number (aka syncToken).')
-parser.add_argument('--min-serial', type=int, metavar="SERIAL", help='Only process the file id serial number (aka syncToken) is greater than SERIAL. No output is less or equal.')
+parser.add_argument('--min-serial', type=int, metavar="SERIAL", help='Only process the file id serial number (aka syncToken) is greater than SERIAL. No output if less or equal.')
 parser.add_argument('--quiet', action="store_true", help='Do not print any extra info, e.g. serial number, etc.')
 parser.add_argument('--verbose', '-v', action="store_true", help='Print the Region and Services along with each IP range.')
 parser.usage = parser.format_usage().rstrip()[7:]
@@ -140,7 +139,7 @@ for xarg in extra:
                 _pfx.append(prefix)
     prefixes = _pfx
 
-if not args.no_print_serial:
+if not args.quiet:
     print('# SERIAL=%s' % ipranges['syncToken'])
 
 # Now it's the time to process the IPs found in 'extra', if any
@@ -153,7 +152,7 @@ if ips:
                 _pfx.append(prefix)
     prefixes = _pfx
 
-if args.verbose:
+if args.verbose and not args.quiet:
     print('# %d prefixes found / %d prefixes consolidated / %d prefixes matching' % (
         len(ipranges['prefixes']), len(pfx_dict), len(prefixes)))
 
