@@ -35,30 +35,20 @@ def parse_args(argv):
     """
     Parse command line arguments.
     """
-    def _type_instance_id(value):
-        """
-        Validate Instance ID type, make sure it is i-1234...
-        """
-        if not re.match('^i-[a-f0-9]+$', value):
-            raise argparse.ArgumentTypeError("must be an instance id, e.g. i-1234abcd1234abcd")
-        return value
 
     parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter, add_help=False)
 
     group_general = parser.add_argument_group('General Options')
-    group_general.add_argument('-p', '--profile', dest='profile', type=str, help='Configuration profile from ~/.aws/{credentials,config}')
-    group_general.add_argument('-r', '--region', dest='region', type=str, help='Set / override AWS region.')
-    group_general.add_argument('-v', '--verbose', action='store_const', dest='log_level', const=logging.INFO, default=logging.WARN, help='Increase log_level level')
-    group_general.add_argument('-d', '--debug', action='store_const', dest='log_level', const=logging.DEBUG, help='Increase log_level level')
-    group_general.add_argument('-h', '--help', action="help", help='Print this help and exit')
+    group_general.add_argument('--profile', '-p', dest='profile', type=str, help='Configuration profile from ~/.aws/{credentials,config}')
+    group_general.add_argument('--region', '-r', dest='region', type=str, help='Set / override AWS region.')
+    group_general.add_argument('--verbose', '-v', action='store_const', dest='log_level', const=logging.INFO, default=logging.WARN, help='Increase log_level level')
+    group_general.add_argument('--debug', '-d', action='store_const', dest='log_level', const=logging.DEBUG, help='Increase log_level level')
+    group_general.add_argument('--help', '-h', action="help", help='Print this help and exit')
 
     group_instance_wrapper = parser.add_argument_group('Instance Selection')
     group_instance = group_instance_wrapper.add_mutually_exclusive_group(required=True)
-    group_instance.add_argument('-l', '--list', dest='list', action="store_true", help='List instances available for SSM Session')
-    group_instance.add_argument('-i', '--instance-id', dest='instance', metavar='INSTANCE_ID', type=_type_instance_id, help='Instance ID in a form i-1234abcd1234abcd')
-    group_instance.add_argument('-n', '--name', dest='name', metavar="INSTANCE_NAME", help='Instance name or host name')
-
-    parser.usage = "{} [OPTIONS] [-- COMMAND [ARG ...]]".format(parser.prog)
+    group_instance.add_argument('INSTANCE', nargs='?', help='Instance ID, Name, Host name or IP address')
+    group_instance.add_argument('--list', '-l', dest='list', action="store_true", help='List instances available for SSM Session')
 
     parser.description = 'Start SSM session to a given instance'
     parser.epilog = '''
@@ -97,6 +87,10 @@ class InstanceResolver():
         self.ec2_client = session.client('ec2')
 
     def get_list(self):
+        def _try_append(_list, _dict, _key):
+            if _key in _dict:
+                _list.append(_dict[_key])
+
         items = {}
 
         # List instances from SSM
@@ -132,12 +126,18 @@ class InstanceResolver():
                 instance_id = instance['InstanceId']
                 if not instance_id in items:
                     continue
+
+                # Find instance IPs
                 items[instance_id]['Addresses'] = []
-                items[instance_id]['Addresses'].append(instance.get('PrivateIpAddress'))
-                items[instance_id]['Addresses'].append(instance.get('PublicIpAddress'))
+                _try_append(items[instance_id]['Addresses'], instance, 'PrivateIpAddress')
+                _try_append(items[instance_id]['Addresses'], instance, 'PublicIpAddress')
+
+                # Find instance name from tag Name
+                items[instance_id]['InstanceName'] = None
                 for tag in instance['Tags']:
                     if tag['Key'] == 'Name':
                         items[instance_id]['InstanceName'] = tag['Value']
+
                 logger.debug("Updated instance: %s: %r", instance_id, items[instance_id])
         return items
 
@@ -145,33 +145,41 @@ class InstanceResolver():
         hostname_len = 0
         instname_len = 0
 
-        items = self.get_list()
+        items = self.get_list().values()
+
         if not items:
             logger.warning("No instances registered in SSM!")
             return
 
-        for key in items:
-            item = items[key]
+        items = list(items)
+        items.sort(key=lambda x: x.get('InstanceName') or x.get('HostName'))
+
+        for item in items:
             hostname_len = max(hostname_len, len(item['HostName']))
             instname_len = max(instname_len, len(item['InstanceName']))
-        for key in items:
-            item = items[key]
-            print(f"{item['InstanceId']}   {item['HostName']:{hostname_len}}   {item['InstanceName']:{instname_len}}")
 
-    def resolve_name(self, name):
+        for item in items:
+            print(f"{item['InstanceId']}   {item['HostName']:{hostname_len}}   {item['InstanceName']:{instname_len}}   {' '.join(item['Addresses'])}")
+
+    def resolve_instance(self, instance):
+        # Is it a valid Instance ID?
+        if re.match('^i-[a-f0-9]+$', instance):
+            return instance
+
+        # It is not - find it in the list
         instances = []
 
         items = self.get_list()
         for instance_id in items:
             item = items[instance_id]
-            if name.lower() in [item['HostName'].lower(), item['InstanceName'].lower()]:
+            if instance.lower() in [item['HostName'].lower(), item['InstanceName'].lower()] + item['Addresses']:
                 instances.append(instance_id)
 
         if not instances:
             return None
 
         if len(instances) > 1:
-            logger.warning("Found %d instances with name '%s': %s", len(instances), name, " ".join(instances))
+            logger.warning("Found %d instances for '%s': %s", len(instances), instance, " ".join(instances))
             logger.warning("Use --instance-id INSTANCE_ID to connect to a specific one")
             return None
 
@@ -188,13 +196,12 @@ if __name__ == "__main__":
     if args.list:
         InstanceResolver(args).print_list()
         quit(0)
-    elif args.instance:
-        instance = args.instance
-    elif args.name:
-        instance = InstanceResolver(args).resolve_name(args.name)
+
+    instance = InstanceResolver(args).resolve_instance(args.INSTANCE)
 
     if not instance:
-        logger.warning("Could not resolve instance")
+        logger.warning("Could not resolve Instance ID for '%s'", args.INSTANCE)
+        logger.warning("Perhaps the '%s' is not registered in SSM?", args.INSTANCE)
         quit(1)
 
     start_session(instance, profile=args.profile, region=args.region)
