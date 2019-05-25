@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 
 # Convenience wrapper around 'aws ssm start-session'
+# can resolve instance id from Name tag, hostname, IP address, etc.
+#
+# See https://aws.nz/aws-utils/ssm-session for more info.
+#
 # Author: Michael Ludvig (https://aws.nz)
 
 # The script can list available instances, resolve instance names,
@@ -56,8 +60,8 @@ def parse_args(argv):
 
     parser.usage = "{} [OPTIONS] [-- COMMAND [ARG ...]]".format(parser.prog)
 
-    parser.description='Start SSM session to a given instance'
-    parser.epilog='''
+    parser.description = 'Start SSM session to a given instance'
+    parser.epilog = '''
 Examples:
 
 
@@ -143,7 +147,7 @@ class InstanceResolver():
 
         items = self.get_list()
         if not items:
-            logger.warn("No instances registered in SSM!")
+            logger.warning("No instances registered in SSM!")
             return
 
         for key in items:
@@ -167,8 +171,8 @@ class InstanceResolver():
             return None
 
         if len(instances) > 1:
-            logger.warn("Found %d instances with name '%s': %s", len(instances), name, " ".join(instances))
-            logger.warn("Use --instance-id INSTANCE_ID to connect to a specific one")
+            logger.warning("Found %d instances with name '%s': %s", len(instances), name, " ".join(instances))
+            logger.warning("Use --instance-id INSTANCE_ID to connect to a specific one")
             return None
 
         # Found only one instance - return it
@@ -176,8 +180,7 @@ class InstanceResolver():
 
 if __name__ == "__main__":
     ## Split command line to main args and optional command to run
-    argv = sys.argv[1:]
-    args = parse_args(argv)
+    args = parse_args(sys.argv[1:])
 
     logger = configure_logging(args.log_level)
 
