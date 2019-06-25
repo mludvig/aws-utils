@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+
+# Docode SNS emails: {"awslogs":{"data":"H4sIAAAAAAA..."}}
+
+import sys
+import base64
+import json
+import gzip
+
+if __name__=="__main__":
+    print("Copy & paste 'awslogs' json:")
+    data_in = sys.stdin.read()
+    data_b64 = json.loads(data_in)['awslogs']['data']
+    data_zip = base64.b64decode(data_b64)
+    data_json = gzip.decompress(data_zip).decode('ascii')
+    data = json.loads(data_json)
+    print(json.dumps(data, indent=2))
