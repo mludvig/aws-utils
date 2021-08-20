@@ -27,7 +27,7 @@ Credentials in the environment.
 
    -c ROLES.CSV Path to the config file with IAM Role ARNs.
                 Optional, not needed if using '-r ARN', only needed
-		when using '-r ROLENAME'.
+                when using '-r ROLENAME'.
 
    -p PROFILE   AWS-CLI Profile name as defined in ~/.aws/config.
                 Optional, will use default or instance meta-data if
@@ -42,6 +42,10 @@ Credentials in the environment.
                 of SECONDS. Minimum is 900 (=15 minutes), max 43200 (=12 hour).
                 Validity longer than 1 hour must be explicitly permitted
                 in the target role configuration. Default is 3600 (= 1 hour).
+
+   -m MFA-SERIAL
+                MFA serial number / ARN. Optional. Typical format is:
+                arn:aws:iam::123456789012:mfa/user.name
 
    -l           List role names from ROLES.CSV
 
@@ -65,7 +69,7 @@ JQ=$(which jq 2>/dev/null) || true
 test -z "${JQ}" && fatal "The 'jq' utility not found. Please install it or add its location to \$PATH"
 
 VALIDITY_SECONDS=3600
-while getopts "c:g:hlp:r:s:" OPT; do
+while getopts "c:g:hlm:p:r:s:" OPT; do
 	case "${OPT}" in
 	c)
 		ROLES_CSV="${OPTARG}"
@@ -74,6 +78,9 @@ while getopts "c:g:hlp:r:s:" OPT; do
 	g)
 		AWS="${AWS} --region=${OPTARG}"
 		export AWS_DEFAULT_REGION=${OPTARG}
+		;;
+	m)
+		MFA_SERIAL="${OPTARG}"
 		;;
 	p)
 		AWS="${AWS} --profile=${OPTARG}"
@@ -118,7 +125,7 @@ else
 	ROLE_ARN=${VAR_ARN}
 fi
 
-ROLE_JSON=$(${AWS} sts assume-role --role-arn ${ROLE_ARN} --role-session-name ${ROLE_NAME}_$(date +%s) --duration-seconds ${VALIDITY_SECONDS})
+ROLE_JSON=$(${AWS} sts assume-role --role-arn ${ROLE_ARN} --role-session-name ${ROLE_NAME}_$(date +%s) --duration-seconds ${VALIDITY_SECONDS} ${MFA_SERIAL:+--serial-number ${MFA_SERIAL}})
 
 unset AWS_ACCESS_KEY_ID
 unset AWS_SECRET_ACCESS_KEY
