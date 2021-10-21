@@ -11,11 +11,6 @@ the source :)
 
 ## aws-utils scripts
 
-* **[ssm-session](ssm-session)**
-
-    Convenience wrapper around `aws ssm start-session` that can open
-    SSM Session to an instance specified by Name or IP Address.
-
 * **get-credentials**
 
 * **get-instance-credentials**
@@ -27,6 +22,10 @@ the source :)
 * **crawl-metadata**
 
 * **find-ami**
+
+## [aws-ssm-tools scripts](https://github.com/mludvig/aws-ssm-tools)
+
+Also check out my repository dedicated to [AWS Systems Manager convenience tools](https://github.com/mludvig/aws-ssm-tools)
 
 ## Author and License
 
