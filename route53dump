@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+
+# This script dumps a Route53 zone in BIND format
+
+import sys
+
+import boto3
+import tabulate
+
+# Create a Route53 client
+client = boto3.client('route53')
+
+# Get the zone name from the command line
+zone_name = sys.argv[1].rstrip('.')
+
+# Get the zone ID
+response = client.list_hosted_zones_by_name(
+    DNSName=zone_name,
+    MaxItems='1'
+)
+
+zone_id = response['HostedZones'][0]['Id']
+
+# Get the zone contents
+response = client.list_resource_record_sets(
+    HostedZoneId=zone_id
+)
+
+# Output the zone contents in bind format
+data = []
+for record in response['ResourceRecordSets']:
+    for value in record['ResourceRecords']:
+        data.append({
+            'Name': record['Name'],
+            'Class': 'IN',
+            'Type': record['Type'],
+            'TTL': record['TTL'],
+            'Value': value['Value']
+        })
+# use tabulate to print the records in bind format, no headers
+print(tabulate.tabulate(data, tablefmt='plain'))
